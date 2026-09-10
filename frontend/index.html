@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DecisionOS</title>
+    <script>
+      // Applied synchronously, before React (and theme.jsx's ThemeModeProvider)
+      // even loads, so there's no flash of the wrong theme on first paint.
+      // theme.jsx's ThemeModeProvider takes over from here on toggle/OS-change.
+      (function () {
+        try {
+          var stored = localStorage.getItem("decisionos-theme");
+          var mode = stored === "light" || stored === "dark"
+            ? stored
+            : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+          document.documentElement.setAttribute("data-theme", mode);
+        } catch (e) { /* localStorage unavailable (e.g. private mode) — default light stays */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
