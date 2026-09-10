@@ -1,0 +1,16 @@
+{
+  "name": "decisionos-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "DecisionOS desktop shell (Tauri v2) — wraps the existing React frontend and Node backend into a native installable app.",
+  "scripts": {
+    "prepare-backend": "node scripts/prepare-backend-resources.mjs",
+    "stage-sidecar": "node scripts/stage-sidecar-local.mjs",
+    "dev": "npm run prepare-backend && npm run stage-sidecar && tauri dev",
+    "build": "npm run prepare-backend && npm run stage-sidecar && tauri build",
+    "icon": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}
