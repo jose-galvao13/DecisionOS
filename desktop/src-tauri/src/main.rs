@@ -24,6 +24,55 @@ use tauri_plugin_shell::ShellExt;
 #[derive(Default)]
 struct SidecarState(Mutex<Option<CommandChild>>);
 
+/// Tries the two layouts `resource_dir()` has been observed to produce
+/// across Tauri versions/bundlers for a `"resources/backend/**/*": "backend/"`
+/// mapping — with the `resources/` segment already stripped, and with it
+/// still present. Falls back to the first candidate (preserving the
+/// original panic-with-a-clear-message behavior) but only after printing
+/// a full directory listing of resource_dir(), so a second wrong guess is
+/// not needed: the next log tells us exactly what's really on disk.
+fn locate_backend_entry(resource_dir: &std::path::Path) -> std::path::PathBuf {
+    let candidates = [
+        resource_dir.join("backend").join("src").join("desktop-main.js"),
+        resource_dir
+            .join("resources")
+            .join("backend")
+            .join("src")
+            .join("desktop-main.js"),
+    ];
+    for candidate in &candidates {
+        if candidate.exists() {
+            println!("[main] found desktop-main.js at {:?}", candidate);
+            return candidate.clone();
+        }
+    }
+    eprintln!(
+        "[main] could not find desktop-main.js in either expected location under {:?}",
+        resource_dir
+    );
+    eprintln!("[main] actual contents of resource_dir() (up to 4 levels deep):");
+    print_dir_tree(resource_dir, 0);
+    candidates[0].clone()
+}
+
+fn print_dir_tree(dir: &std::path::Path, depth: usize) {
+    if depth > 4 {
+        return;
+    }
+    match std::fs::read_dir(dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                eprintln!("[main] {}{}", "  ".repeat(depth), path.display());
+                if path.is_dir() {
+                    print_dir_tree(&path, depth + 1);
+                }
+            }
+        }
+        Err(e) => eprintln!("[main] {}<could not read dir: {}>", "  ".repeat(depth), e),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // Prevents a second DecisionOS window from starting a second
@@ -66,14 +115,18 @@ fn main() {
             std::fs::create_dir_all(&app_data_dir)?;
 
             // The resource path Tauri copies `resources/backend/**` to at build
-            // time (see tauri.conf.json's bundle.resources mapping).
-            let backend_entry = app_handle
+            // time (see tauri.conf.json's bundle.resources mapping). Whether
+            // resource_dir() itself already includes a nested "resources"
+            // folder, or points straight at the resource payload root, has
+            // genuinely differed across Tauri versions/platforms — rather
+            // than assume one and risk a silent wrong guess, try both real
+            // candidates, and if neither exists, dump what's actually there
+            // so the next run's log is diagnostic instead of another guess.
+            let resource_dir = app_handle
                 .path()
                 .resource_dir()
-                .expect("could not resolve resource directory")
-                .join("backend")
-                .join("src")
-                .join("desktop-main.js");
+                .expect("could not resolve resource directory");
+            let backend_entry = locate_backend_entry(&resource_dir);
 
             let sidecar = app_handle
                 .shell()
