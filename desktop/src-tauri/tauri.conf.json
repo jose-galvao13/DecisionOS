@@ -50,16 +50,5 @@
         "languages": ["English", "PortugueseBR"]
       }
     }
-  },
-  "plugins": {
-    "shell": {
-      "scope": [
-        {
-          "name": "binaries/node",
-          "sidecar": true,
-          "args": true
-        }
-      ]
-    }
   }
 }
