@@ -140,7 +140,15 @@ fn main() {
                 // runs the same clean-shutdown path (close HTTP server,
                 // stop embedded Postgres) before exiting on its own.
                 let state = app_handle.state::<SidecarState>();
-                if let Some(child) = state.0.lock().unwrap().take() {
+                // Split the lock+take into its own statement: the MutexGuard
+                // temporary from `.lock().unwrap()` needs to be dropped right
+                // here, not still alive across the `if let` block below —
+                // keeping it alive that long is what the borrow checker
+                // rejected (E0597). `.take()` already gives us an owned
+                // `Option<CommandChild>`, so nothing below actually needs
+                // the guard anymore.
+                let maybe_child = state.0.lock().unwrap().take();
+                if let Some(mut child) = maybe_child {
                     let _ = child.write("shutdown\n".as_bytes());
                     // Give it a moment to flush embedded Postgres to disk
                     // cleanly; fall back to a hard kill if it's still alive
