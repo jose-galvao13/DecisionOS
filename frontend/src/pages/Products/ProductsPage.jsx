@@ -30,8 +30,8 @@ export default function ProductsPage({ analytics, sourceInfo }) {
               <div className="flex items-center gap-2" style={{ color: C.charcoal }}>
                 <Target size={13} color={C.blue} /> {p.product}
               </div>
-              <div className="text-right tabnum">{fmtK(p.revenue, locale)}</div>
-              <div className="text-right tabnum">{fmtK(p.profit, locale)}</div>
+              <div className="text-right tabnum" style={{ color: C.charcoal }}>{fmtK(p.revenue, locale)}</div>
+              <div className="text-right tabnum" style={{ color: C.charcoal }}>{fmtK(p.profit, locale)}</div>
               <div className="text-right tabnum" style={{ color: margin < 15 ? C.red : C.green }}>{pct(margin)}</div>
               <div className="text-right tabnum" style={{ color: C.textMuted }}>{pct((p.revenue / totalRevenue) * 100)}</div>
             </div>
