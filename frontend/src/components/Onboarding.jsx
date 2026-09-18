@@ -159,7 +159,7 @@ function Onboarding({ onFinish, onDataReady }) {
           <div className="rounded-xl overflow-hidden mb-5" style={{ border: `1px solid ${C.greyBorder}` }}>
             <table className="w-full text-sm">
               <thead><tr style={{ background: C.greyBg, color: C.textSecondary }}>{headers.map((h) => <th key={h} className="text-left font-medium px-3 py-2 whitespace-nowrap">{h}</th>)}</tr></thead>
-              <tbody className="tabnum">
+              <tbody className="tabnum" style={{ color: C.charcoal }}>
                 {sample.map((r, i) => (
                   <tr key={i} style={{ borderTop: `1px solid ${C.greyBorderSoft}` }}>
                     {headers.map((h) => <td key={h} className="px-3 py-2 whitespace-nowrap">{String(r[h]).slice(0, 24)}</td>)}
