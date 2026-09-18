@@ -1,4 +1,5 @@
 // Deterministic demo dataset used when there's no connected data source.
+import { slugify } from "./mapping.js";
 
 /* ---------------------------------------------------------------
    DEMO DATASET — deterministic synthetic transactions so the
