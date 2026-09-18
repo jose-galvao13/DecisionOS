@@ -1,0 +1,1 @@
+const a=(t,e="pt-PT")=>{const o=Math.abs(t);return o>=1e6?`€${(t/1e6).toFixed(2)}M`:o>=1e3?`€${(t/1e3).toFixed(1)}K`:`€${Math.round(t).toLocaleString(e)}`},r=(t,e="€",o="pt-PT")=>`${t>=0?"+":""}${e==="€"?a(t,o).replace("€","€"):t.toFixed(1)+e}`,n=(t,e=1)=>`${t>=0?"+":""}${t.toFixed(e)}%`;export{r as a,a as f,n as p};
