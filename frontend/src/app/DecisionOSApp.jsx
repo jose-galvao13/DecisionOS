@@ -86,7 +86,12 @@ function DecisionOSApp({ user, onLogout }) {
     (async () => {
       try {
         const data = await apiFetch("/api/datasources");
-        const latest = data.dataSources?.[0];
+        // Only pick up a source that actually imported data. A previous
+        // failed/half-finished import leaves a data_sources row with
+        // status 'error' (or 'syncing') and 0 rows; treating that as
+        // "connected" hid the onboarding modal and left the user with an
+        // empty dashboard and no obvious way to upload again.
+        const latest = data.dataSources?.find((d) => d.status === "connected" && Number(d.row_count) > 0);
         if (!cancelled && latest) {
           setSourceInfo({ type: latest.type, name: latest.name, rows: latest.row_count || 0, dataSourceId: latest.id, lastUpdated: latest.last_sync_at });
           setShowOnboarding(false);
