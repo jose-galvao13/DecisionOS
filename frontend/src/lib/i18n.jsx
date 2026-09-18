@@ -13,6 +13,7 @@ const STRINGS = {
     "nav.decisionLog": "Decision Log",
     "nav.customers": "Customer Intelligence",
     "nav.data": "Dados", "nav.reports": "Relatórios", "nav.settings": "Definições", "nav.more": "Mais",
+    "nav.dataQuality": "Qualidade dos dados", "nav.products": "Produtos",
     "execMode.on": "Modo executivo: ligado", "execMode.off": "Modo executivo",
     "search.placeholder": "Pesquisar…",
     "header.demoData": "Dados de demonstração", "header.connected": "ligado",
@@ -190,6 +191,7 @@ const STRINGS = {
     "chat.needsRealData": "Ainda estás a ver os dados de demonstração. Carrega um ficheiro real (ou liga uma base de dados) para eu poder responder com os teus números.",
     "onboarding.uploading": "A carregar e a importar…",
     "analytics.loading": "A carregar dados do backend…",
+    "analytics.errorTitle": "Não foi possível carregar os dados",
     "analytics.noData": "Ainda não há transações nesta organização. Carregue ou ligue uma fonte de dados em \"Dados\".",
   },
   en: {
@@ -198,6 +200,7 @@ const STRINGS = {
     "nav.decisionLog": "Decision Log",
     "nav.customers": "Customer Intelligence",
     "nav.data": "Data", "nav.reports": "Reports", "nav.settings": "Settings", "nav.more": "More",
+    "nav.dataQuality": "Data quality", "nav.products": "Products",
     "execMode.on": "Executive mode: on", "execMode.off": "Executive mode",
     "search.placeholder": "Search…",
     "header.demoData": "Demo data", "header.connected": "connected",
@@ -375,6 +378,7 @@ const STRINGS = {
     "chat.needsRealData": "You're still looking at demo data. Upload a real file (or connect a database) so I can answer with your actual numbers.",
     "onboarding.uploading": "Uploading and importing…",
     "analytics.loading": "Loading data from the backend…",
+    "analytics.errorTitle": "Couldn't load your data",
     "analytics.noData": "No transactions in this organization yet. Upload or connect a data source under \"Data\".",
   },
 };
