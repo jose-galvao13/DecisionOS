@@ -14,13 +14,26 @@ async function dimensionResolver(client, orgId, table, keyColumn = "external_id"
     if (!key) return null;
     if (cache.has(key)) return cache.get(key);
     const name = String(rawValue).trim();
-    const { rows } = await client.query(
-      `INSERT INTO ${table} (id, org_id, ${keyColumn}, name)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (org_id, ${keyColumn}) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-      [randomUUID(), orgId, key, name]
-    );
+    // regions/channels are keyed by `name` itself (UNIQUE (org_id, name)) and
+    // have no separate external_id column, so the key column and `name` are
+    // the same column. Listing it twice made Postgres reject the INSERT with
+    // 'column "name" specified more than once'.
+    const nameIsKey = keyColumn === "name";
+    const { rows } = nameIsKey
+      ? await client.query(
+          `INSERT INTO ${table} (id, org_id, name)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (org_id, name) DO UPDATE SET name = EXCLUDED.name
+           RETURNING id`,
+          [randomUUID(), orgId, name]
+        )
+      : await client.query(
+          `INSERT INTO ${table} (id, org_id, ${keyColumn}, name)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (org_id, ${keyColumn}) DO UPDATE SET name = EXCLUDED.name
+           RETURNING id`,
+          [randomUUID(), orgId, key, name]
+        );
     const id = rows[0].id;
     cache.set(key, id);
     return id;
