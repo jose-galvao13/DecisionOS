@@ -69,10 +69,20 @@ function AuthScreen({ onAuthenticated }) {
           <button type="submit" disabled={loading} className="w-full py-2.5 rounded-xl text-sm font-medium text-white disabled:opacity-50 flex items-center justify-center gap-2" style={{ background: C.blue }}>
             {loading ? <><Loader2 size={14} className="animate-spin" /> {t("auth.loading")}</> : (mode === "login" ? t("auth.login.cta") : t("auth.register.cta"))}
           </button>
-          <button type="button" onClick={() => { setError(""); setMode((m) => (m === "login" ? "register" : "login")); }} className="w-full text-sm text-center" style={{ color: C.blue }}>
+                    <button type="button" onClick={() => { setError(""); setMode((m) => (m === "login" ? "register" : "login")); }} className="w-full text-sm text-center" style={{ color: C.blue }}>
             {mode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin")}
           </button>
         </form>
+        <div className="px-6 pb-6 -mt-1">
+          <button
+            type="button"
+            onClick={() => onAuthenticated({ name: "Demo" })}
+            className="w-full py-2.5 rounded-xl text-sm font-medium"
+            style={{ border: `1px solid ${C.greyBorder}`, color: C.charcoal }}
+          >
+            {t("auth.tryDemo")}
+          </button>
+        </div>
       </div>
     </div>
   );
