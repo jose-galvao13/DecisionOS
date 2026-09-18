@@ -90,6 +90,20 @@ const fontImport = `
     --blue-soft: #15233F; --green-soft: #11291F; --red-soft: #2E1917; --yellow-soft: #2F250F;
   }
   html, body { background: var(--grey-bg); }
+  /* Sensible defaults so anything that doesn't set its own colors still
+     follows the theme. Without these, text with no explicit color fell
+     back to the browser's black (unreadable on dark surfaces) and form
+     fields kept the browser's white background with near-white text in
+     dark mode. :where() keeps specificity at zero, so any Tailwind class
+     or inline style on a specific field still wins over these defaults. */
+  body { color: var(--charcoal); }
+  :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+    select, textarea
+  ) { background-color: var(--surface); }
+  input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
+  /* Native pieces (select dropdown list, date pickers, scrollbars) follow the theme too. */
+  [data-theme="dark"] { color-scheme: dark; }
   body, body * { transition: background-color .12s ease, border-color .12s ease, color .12s ease; }
 `;
 
