@@ -244,7 +244,7 @@ export default function SettingsPage({ sourceInfo }) {
 
   return (
     <div>
-      <SectionTitle eyebrow={t("nav.settings") || "Settings"} title="Settings" desc="" />
+      <SectionTitle eyebrow={t("nav.settings") || "Settings"} title={t("settings.title")} desc={t("settings.desc")} />
 
       <div className="grid grid-cols-2 gap-4 mt-4">
         <Card className="p-5">

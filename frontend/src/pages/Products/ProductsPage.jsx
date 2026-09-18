@@ -12,7 +12,7 @@ export default function ProductsPage({ analytics, sourceInfo }) {
 
   return (
     <div>
-      <SectionTitle eyebrow={t("nav.products") || "Products"} title="Products" desc="" />
+      <SectionTitle eyebrow={t("nav.products") || "Products"} title={t("nav.products")} desc="" />
       <SourceBadge sourceInfo={sourceInfo} />
 
       <Card className="p-0 mt-4 overflow-hidden">
@@ -33,7 +33,7 @@ export default function ProductsPage({ analytics, sourceInfo }) {
               <div className="text-right tabnum" style={{ color: C.charcoal }}>{fmtK(p.revenue, locale)}</div>
               <div className="text-right tabnum" style={{ color: C.charcoal }}>{fmtK(p.profit, locale)}</div>
               <div className="text-right tabnum" style={{ color: margin < 15 ? C.red : C.green }}>{pct(margin)}</div>
-              <div className="text-right tabnum" style={{ color: C.textMuted }}>{pct((p.revenue / totalRevenue) * 100)}</div>
+              <div className="text-right tabnum" style={{ color: C.textMuted }}>{((p.revenue / totalRevenue) * 100).toFixed(1)}%</div>
             </div>
           );
         })}

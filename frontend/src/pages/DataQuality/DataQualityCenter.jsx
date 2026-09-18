@@ -127,7 +127,7 @@ export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
   if (!q) {
     return (
       <div>
-        <SectionTitle eyebrow={t("nav.dataQuality") || "Data Quality"} title="Data Quality Center" desc="" />
+        <SectionTitle eyebrow={t("nav.dataQuality") || "Data Quality"} title={t("dq.title")} desc="" />
         <Card className="p-6 text-sm" style={{ color: C.textMuted }}>
           {t("dq.noData") || "Connect a data source to see its quality report."}
         </Card>
@@ -139,7 +139,7 @@ export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
 
   return (
     <div>
-      <SectionTitle eyebrow={t("nav.dataQuality") || "Data Quality"} title="Data Quality Center" desc="" />
+      <SectionTitle eyebrow={t("nav.dataQuality") || "Data Quality"} title={t("dq.title")} desc="" />
 
       <div className="grid grid-cols-3 gap-4 mt-4">
         {/* Score card */}

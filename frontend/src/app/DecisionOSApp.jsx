@@ -206,7 +206,7 @@ function DecisionOSApp({ user, onLogout }) {
   };
 
   return (
-    <div className="w-full h-full flex" style={{ background: C.greyBg, minHeight: 700 }}>
+    <div className="app-shell w-full h-full flex" style={{ background: C.greyBg, minHeight: 700 }}>
       <style>{fontImport}</style>
       {!checkingExisting && showOnboarding && <Onboarding onFinish={() => setShowOnboarding(false)} onDataReady={handleDataReady} />}
       <input ref={replaceInput} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files[0] && handleReplace(e.target.files[0])} />
@@ -235,7 +235,7 @@ function DecisionOSApp({ user, onLogout }) {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 shrink-0 flex items-center justify-between px-6" style={{ background: C.surface, borderBottom: `1px solid ${C.greyBorder}` }}>
+        <header className="app-header h-16 shrink-0 flex items-center justify-between px-6" style={{ background: C.surface, borderBottom: `1px solid ${C.greyBorder}` }}>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: C.greyBg, width: 320 }}>
             <Search size={15} color={C.textMuted} /><span className="text-sm" style={{ color: C.textMuted }}>{t("search.placeholder")}</span>
           </div>
@@ -253,7 +253,7 @@ function DecisionOSApp({ user, onLogout }) {
             </button>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="app-main flex-1 overflow-y-auto p-8">
           {showFilterBar && <FilterBar analytics={analytics} filters={filters} onChange={(patch) => setFilters((f) => ({ ...f, ...patch }))} />}
           <Suspense
             fallback={

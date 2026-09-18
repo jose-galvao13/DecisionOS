@@ -105,6 +105,29 @@ const fontImport = `
   /* Native pieces (select dropdown list, date pickers, scrollbars) follow the theme too. */
   [data-theme="dark"] { color-scheme: dark; }
   body, body * { transition: background-color .12s ease, border-color .12s ease, color .12s ease; }
+
+  /* ---- Print / "Export PDF" ---------------------------------------
+     Only the report sheet should reach the page: hide the sidebar,
+     top bar, filter bar, chat widget and anything marked .no-print,
+     un-clip the scrolling <main>, and force the light palette so a
+     PDF is readable even when the dark theme is active on screen. */
+  @media print {
+    @page { margin: 14mm; }
+    html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+    html[data-theme="dark"] {
+      --surface: #FFFFFF; --grey-bg: #F4F6FA; --grey-border: #E3E7EE; --grey-border-soft: #EDF0F5;
+      --charcoal: #1B2431; --text-secondary: #5C6673; --text-muted: #8891A0;
+      --blue-soft: #EAF1FE; --green-soft: #E7F5EE; --red-soft: #FBEAE7; --yellow-soft: #FCF1E1;
+      color-scheme: light;
+    }
+    body, body * { transition: none !important; }
+    .app-shell { display: block !important; height: auto !important; min-height: 0 !important; background: #fff !important; }
+    .app-shell aside, .app-shell header.app-header, .no-print, .fixed { display: none !important; }
+    .app-main { overflow: visible !important; padding: 0 !important; }
+    .report-sheet { border: none !important; box-shadow: none !important; padding: 0 !important; max-width: none !important; }
+    .report-section { break-inside: avoid; page-break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
 `;
 
 /* ---------------------------------------------------------------

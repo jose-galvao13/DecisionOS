@@ -4,6 +4,7 @@ import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { fmtK, pct } from "../../lib/format";
 import { computeAlerts } from "../../lib/metrics";
+import { alertCopy } from "../../lib/alertCopy";
 import { buildDigest } from "../../lib/digest";
 import { apiFetch } from "../../api/client";
 import { callClaudeWithTools, ADVISOR_SYSTEM } from "../../api/aiClient";
@@ -74,15 +75,7 @@ function Overview({ analytics, sourceInfo, execMode, filters }) {
   const pieColors = [C.blue, "#5C93F0", "#8FB4F5", "#BFD4F9", C.greyBorder];
   const dimLabel = (d) => (d === "Produto" ? t("dim.product") : d === "Região" ? t("dim.region") : d === "Canal" ? t("dim.channel") : d);
   const alerts = useMemo(() => computeAlerts(analytics), [analytics]);
-  const alertCopy = (a) => {
-    if (a.type === "margin") return { title: t("alerts.margin"), line: t("alerts.marginLine", { name: a.name, pp: a.pp.toFixed(1) }) };
-    if (a.type === "churn") return { title: t("alerts.churn"), line: t("alerts.churnLine", { rate: a.rate.toFixed(1) }) };
-    if (a.type === "growth") return { title: t("alerts.growth"), line: t("alerts.growthLine", { region: a.region, growth: a.growth.toFixed(1), margin: a.margin.toFixed(1) }) };
-    if (a.type === "cost") return { title: t("alerts.cost"), line: t("alerts.costLine", { impact: fmtK(a.impact, locale) }) };
-    if (a.type === "discount") return { title: t("alerts.discount"), line: t("alerts.discountLine", { impact: fmtK(a.impact, locale) }) };
-    if (a.type === "productDecline") return { title: t("alerts.productDecline"), line: t("alerts.productDeclineLine", { product: a.product, growth: a.growth.toFixed(1) }) };
-    return { title: t("alerts.customerRisk"), line: t("alerts.customerRiskLine", { n: a.n }) };
-  };
+  const copyFor = (a) => alertCopy(a, t, locale);
 
   return (
     <div>
@@ -91,7 +84,7 @@ function Overview({ analytics, sourceInfo, execMode, filters }) {
 
       {(decisions.length > 0 || alerts.length > 0) && (
         <div className="mb-6">
-          <DecisionFeed decisions={decisions} alerts={decisions.length ? [] : alerts} alertCopy={alertCopy} dataCoverage={dataCoverage} onTrackDecision={trackDecision} />
+          <DecisionFeed decisions={decisions} alerts={decisions.length ? [] : alerts} alertCopy={copyFor} dataCoverage={dataCoverage} onTrackDecision={trackDecision} />
         </div>
       )}
 
