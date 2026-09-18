@@ -46,15 +46,15 @@ export default function ReportsPage({ analytics, sourceInfo }) {
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
               <div className="text-xs" style={{ color: C.textMuted }}>{t("kpi.revenue") || "Revenue"}</div>
-              <div className="tabnum text-lg font-semibold">{analytics.totals?.revenue?.toLocaleString(locale)}</div>
+              <div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{analytics.totals?.revenue?.toLocaleString(locale)}</div>
             </div>
             <div>
               <div className="text-xs" style={{ color: C.textMuted }}>{t("kpi.profit") || "Profit"}</div>
-              <div className="tabnum text-lg font-semibold">{analytics.totals?.profit?.toLocaleString(locale)}</div>
+              <div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{analytics.totals?.profit?.toLocaleString(locale)}</div>
             </div>
             <div>
               <div className="text-xs" style={{ color: C.textMuted }}>{t("kpi.margin") || "Margin"}</div>
-              <div className="tabnum text-lg font-semibold">{analytics.totals?.margin?.toFixed(1)}%</div>
+              <div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{analytics.totals?.margin?.toFixed(1)}%</div>
             </div>
           </div>
         )}
