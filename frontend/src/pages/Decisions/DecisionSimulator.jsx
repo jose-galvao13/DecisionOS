@@ -201,7 +201,7 @@ function DecisionSimulator({ sourceInfo, filters }) {
                 onClick={commitAsDecision}
                 disabled={committing || committed}
                 className="mt-4 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-60"
-                style={{ background: committed ? C.green : C.charcoal }}
+                style={{ background: committed ? C.green : C.blue, color: C.white }}
               >
                 {committing ? <Loader2 size={14} className="animate-spin" /> : <ClipboardCheck size={14} />}
                 {committed ? "Added to Decision Log" : "Commit this scenario as a decision"}
