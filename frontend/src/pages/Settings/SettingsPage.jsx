@@ -156,7 +156,7 @@ function FxRatesCard() {
           <input value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} type="date"
             className="px-2 py-1.5 rounded-lg text-sm" style={{ border: `1px solid ${C.greyBorder}` }} />
         </div>
-        <button disabled={saving} type="submit" className="px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-50" style={{ background: C.charcoal }}>
+        <button disabled={saving} type="submit" className="px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-50" style={{ background: C.blue }}>
           {saving ? <Loader2 size={14} className="animate-spin" /> : "Add rate"}
         </button>
       </form>
