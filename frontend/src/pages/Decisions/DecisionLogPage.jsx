@@ -338,8 +338,8 @@ export default function DecisionLogPage({ user }) {
                 load();
               } catch (e) { toast.error(e.message); } finally { setMeasuring(false); }
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white shrink-0"
-            style={{ background: C.charcoal }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0"
+            style={{ background: C.blue, color: C.white, opacity: measuring ? 0.7 : 1 }}
             title="Checks every decision whose measurement window has elapsed and records an automatic outcome from real transaction data where possible"
           >
             {measuring ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Measure due decisions now
