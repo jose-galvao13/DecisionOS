@@ -1,6 +1,6 @@
 import React, { useState, useRef } from "react";
 import * as XLSX from "xlsx";
-import { Database, FileSpreadsheet, ChevronRight, CheckCircle2, AlertTriangle, ArrowRight, Loader2, Upload } from "lucide-react";
+import { FileSpreadsheet, ChevronRight, CheckCircle2, AlertTriangle, ArrowRight, Loader2 } from "lucide-react";
 import { C } from "../lib/theme";
 import { useLang } from "../lib/i18n";
 import { apiUpload, apiFetch, pollJob } from "../api/client";
@@ -8,7 +8,7 @@ import { detectMapping, buildUnifiedModel, computeDataQuality } from "../lib/map
 import { Card, Modal, JobProgress, Pill } from "./ui";
 
 /* ---------------------------------------------------------------
-   ONBOARDING — real Excel parsing + mapping + simulated Database
+   ONBOARDING — Excel upload + column mapping (database sources are not offered here for now)
 ----------------------------------------------------------------*/
 // Field list + display labels for the mapping-review step. These match the
 // backend's column-detection keys exactly (src/services/columnDetection.js)
@@ -103,42 +103,19 @@ function Onboarding({ onFinish, onDataReady }) {
           <h2 className="mt-2 text-2xl font-semibold text-white">{t("onboarding.title")}</h2>
           <p className="mt-1 text-sm" style={{ color: "#B7C4DA" }}>{t("onboarding.subtitle")}</p>
         </div>
-        <div className="p-6 grid grid-cols-2 gap-4">
-          <button onClick={() => fileInput.current?.click()} className="text-left p-5 rounded-2xl transition-colors" style={{ border: `1.5px solid ${C.greyBorder}` }}>
+        <div className="p-6">
+          <button onClick={() => fileInput.current?.click()} className="w-full text-left p-5 rounded-2xl transition-colors" style={{ border: `1.5px solid ${C.greyBorder}` }}>
             <input ref={fileInput} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])} />
             <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style={{ background: C.blueSoft }}><FileSpreadsheet size={20} color={C.blue} /></div>
             <div className="font-semibold" style={{ color: C.charcoal }}>{t("onboarding.excel.title")}</div>
             <p className="mt-1 text-sm" style={{ color: C.textSecondary }}>{t("onboarding.excel.desc")}</p>
             <div className="mt-3 inline-flex items-center gap-1 text-sm font-medium" style={{ color: C.blue }}>{t("onboarding.excel.cta")} <ChevronRight size={15} /></div>
           </button>
-          <button onClick={() => setStep("db-sim")} className="text-left p-5 rounded-2xl transition-colors" style={{ border: `1.5px solid ${C.greyBorder}` }}>
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style={{ background: C.blueSoft }}><Database size={20} color={C.blue} /></div>
-            <div className="font-semibold" style={{ color: C.charcoal }}>{t("onboarding.db.title")}</div>
-            <p className="mt-1 text-sm" style={{ color: C.textSecondary }}>{t("onboarding.db.desc")}</p>
-            <div className="mt-3 inline-flex items-center gap-1 text-sm font-medium" style={{ color: C.blue }}>{t("onboarding.db.cta")} <ChevronRight size={15} /></div>
-          </button>
         </div>
         {busy && <div className="mx-6 mb-4 px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: C.blueSoft, color: C.blue }}><Loader2 size={14} className="animate-spin" /> {t("onboarding.uploading")}</div>}
         {error && <div className="mx-6 mb-4 px-3 py-2 rounded-lg text-sm" style={{ background: C.redSoft, color: C.red }}>{error}</div>}
         <div className="px-6 pb-6 text-center">
           <button onClick={onFinish} className="text-sm" style={{ color: C.textMuted }}>{t("onboarding.useDemo")}</button>
-        </div>
-      </Modal>
-    );
-  }
-
-  if (step === "db-sim") {
-    return (
-      <Modal>
-        <div className="p-8">
-          <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4" style={{ background: C.yellowSoft }}><AlertTriangle size={20} color={C.yellow} /></div>
-          <h2 className="text-xl font-semibold" style={{ color: C.charcoal }}>{t("onboarding.dbsim.title")}</h2>
-          <p className="mt-2 text-sm leading-relaxed" style={{ color: C.textSecondary }}>{t("onboarding.dbsim.p1")}</p>
-          <p className="mt-3 text-sm" style={{ color: C.textSecondary }}>{t("onboarding.dbsim.p2")}</p>
-          <div className="mt-6 flex gap-2">
-            <button onClick={() => setStep("choose")} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ border: `1px solid ${C.greyBorder}`, color: C.charcoal }}>{t("onboarding.back")}</button>
-            <button onClick={onFinish} className="px-4 py-2.5 rounded-xl text-sm font-medium text-white" style={{ background: C.blue }}>{t("onboarding.continueDemo")}</button>
-          </div>
         </div>
       </Modal>
     );

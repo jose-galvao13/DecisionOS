@@ -118,8 +118,8 @@ async function main() {
   const quality = assessQuality(rows, MAPPING);
   const result = await importRows({ orgId, dataSourceId, rows, mapping: MAPPING });
   await pool.query(
-    `INSERT INTO data_quality_reports (id, org_id, data_source_id, score, issues) VALUES ($1,$2,$3,$4,$5)`,
-    [randomUUID(), orgId, dataSourceId, quality.score, JSON.stringify(quality.issues)]
+    `INSERT INTO data_quality_reports (id, org_id, data_source_id, score, issues, stats) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [randomUUID(), orgId, dataSourceId, quality.score, JSON.stringify(quality.issues), JSON.stringify(quality.stats)]
   );
   await pool.query("UPDATE data_sources SET status = 'active' WHERE id = $1", [dataSourceId]);
 

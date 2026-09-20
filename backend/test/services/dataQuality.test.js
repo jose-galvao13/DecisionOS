@@ -82,3 +82,33 @@ describe("assessQuality", () => {
     expect(issues.find((i) => i.code === "mixed_currencies")).toBeUndefined();
   });
 });
+
+describe("assessQuality — stats + translatable issues", () => {
+  const map = { date: "Data", revenue: "Receita", customer: "Cliente", region: "Região" };
+
+  it("returns the numbers the Data quality cards show", () => {
+    const rows = [
+      { Data: "2026-01-01", Receita: 10, Cliente: "A", Região: "Norte" },
+      { Data: "2026-01-01", Receita: 10, Cliente: "A", Região: "Norte" }, // exact duplicate
+      { Data: "2026-01-02", Receita: 20, Cliente: "", Região: "norte" },   // no customer + "norte"/"Norte"
+      { Data: "2026-01-03", Receita: 30, Cliente: "B", Região: "Sul" },
+    ];
+    const { stats } = assessQuality(rows, map);
+    expect(stats.rows).toBe(4);
+    expect(stats.duplicates).toBe(1);
+    expect(stats.invalidIds).toBe(1);
+    expect(stats.inconsistent).toBe(1);
+    expect(stats.missingPct).toBeCloseTo((1 / 16) * 100, 1);
+  });
+
+  it("gives every issue the params the UI needs to translate it", () => {
+    const rows = [{ Data: "2026-01-01", Receita: 10, Cliente: "A", Região: "Norte" }, { Data: "nope", Receita: 5, Cliente: "A", Região: "Norte" }];
+    const { issues } = assessQuality(rows, map);
+    expect(issues.find((i) => i.code === "invalid_dates").params).toEqual({ n: 1 });
+    expect(issues.find((i) => i.code === "valid_revenue_pct").params).toEqual({ pct: 50 });
+  });
+
+  it("has stats even for an empty dataset", () => {
+    expect(assessQuality([], map).stats.rows).toBe(0);
+  });
+});

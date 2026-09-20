@@ -98,7 +98,7 @@ router.post("/excel/preview", requireMinRole("manager"), upload.single("file"), 
     rowCount: rows.length,
     sampleRows: rows.slice(0, 20),
     suggestedMapping,
-    dataQuality: { score: quality.score, issues: quality.issues },
+    dataQuality: { score: quality.score, issues: quality.issues, stats: quality.stats },
     structure: { titleRowsSkipped: table.titleRows.length, totalsRowsExcluded: table.totalsRowIdxs.length, otherTablesInSheet: tables.length - 1 },
   });
 });
@@ -341,12 +341,15 @@ router.get("/:id/jobs", async (req, res) => {
 
 router.get("/:id/quality", async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT score, issues, created_at FROM data_quality_reports
+    `SELECT score, issues, stats, created_at FROM data_quality_reports
      WHERE org_id = $1 AND data_source_id = $2 ORDER BY created_at DESC LIMIT 1`,
     [req.user.orgId, req.params.id]
   );
   if (!rows.length) return res.status(404).json({ error: "no data quality report for this source yet" });
-  res.json(rows[0]);
+  // score is a Postgres NUMERIC, which node-postgres returns as a *string*
+  // ("100.0"). Sending it on as-is is what made the UI show "NaN%" and
+  // "undefined% healthy" after a reload — send a real number.
+  res.json({ ...rows[0], score: Number(rows[0].score) });
 });
 
 // "Refresh now" — for db-type sources this re-runs the same schema.table +

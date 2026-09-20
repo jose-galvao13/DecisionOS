@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Sparkles, AlertTriangle, ArrowUpRight, Loader2 } from "lucide-react";
-import { C } from "../../lib/theme";
+import { C, chartTooltip } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { fmtK, pct } from "../../lib/format";
 import { computeAlerts } from "../../lib/metrics";
@@ -148,7 +148,7 @@ function Overview({ analytics, sourceInfo, execMode, filters, user }) {
                 <CartesianGrid stroke={C.greyBorderSoft} vertical={false} />
                 <XAxis dataKey="m" tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
-                <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12 }} formatter={(v) => fmtK(v, locale)} />
+                <Tooltip {...chartTooltip} formatter={(v) => fmtK(v, locale)} />
                 <Area type="monotone" dataKey="revenue" stroke={C.blue} strokeWidth={2} fill="url(#rev)" name={t("series.revenue")} />
                 <Line type="monotone" dataKey="profit" stroke={C.green} strokeWidth={2} dot={false} name={t("series.profit")} />
               </AreaChart>
@@ -161,7 +161,7 @@ function Overview({ analytics, sourceInfo, execMode, filters, user }) {
                 <Pie data={byProduct} dataKey="revenue" nameKey="product" innerRadius={55} outerRadius={80} paddingAngle={2}>
                   {byProduct.map((_, i) => <Cell key={i} fill={pieColors[i % pieColors.length]} />)}
                 </Pie>
-                <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12 }} formatter={(v) => fmtK(v)} />
+                <Tooltip {...chartTooltip} formatter={(v) => fmtK(v)} />
               </PieChart>
             </ResponsiveContainer>
           </Card>

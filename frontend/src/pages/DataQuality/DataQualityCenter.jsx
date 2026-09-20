@@ -1,4 +1,4 @@
-import { normalizeQuality } from "../../lib/quality";
+import { normalizeQuality, describeIssue } from "../../lib/quality";
 import React from "react";
 import { CheckCircle2, AlertTriangle, ShieldCheck, Database, Clock, XCircle, Loader2 } from "lucide-react";
 import { C } from "../../lib/theme";
@@ -20,6 +20,9 @@ import { Card, SectionTitle } from "../../components/ui";
    normalized here so this page works whichever produced it.
 ----------------------------------------------------------------*/
 
+
+// Issues come with a red/yellow/green severity from the backend.
+const SEVERITY_COLOR = { red: C.red, yellow: C.yellow, green: C.green };
 
 function CheckRow({ ok, label, count }) {
   return (
@@ -165,7 +168,7 @@ export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
           </div>
           <div className="flex items-center gap-2 mb-2">
             <ShieldCheck size={15} color={C.blue} />
-            <span className="text-sm tabnum" style={{ color: C.charcoal }}>{q.rows ?? "—"} {t("dq.rows") || "rows"}</span>
+            <span className="text-sm tabnum" style={{ color: C.charcoal }}>{q.rows ?? sourceInfo?.rows ?? "—"} {t("dq.rows") || "rows"}</span>
           </div>
           <div className="text-xs" style={{ color: C.textMuted }}>
             {t("dq.duplicates") || "Duplicates"}: {q.duplicates ?? 0}
@@ -192,7 +195,12 @@ export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
       <Card className="p-5">
         {tab === "issues" && (
           (q.issues || []).length
-            ? q.issues.map((it, i) => <div key={i} className="text-sm py-1" style={{ color: C.charcoal }}>{it.message || it.type}</div>)
+            ? q.issues.map((it, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm py-1" style={{ color: C.charcoal }}>
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: SEVERITY_COLOR[it.severity] || C.textMuted }} />
+                {describeIssue(it, t, locale)}
+              </div>
+            ))
             : <div className="text-sm" style={{ color: C.textMuted }}>{t("dq.noIssues") || "No open issues."}</div>
         )}
         {tab === "warnings" && (

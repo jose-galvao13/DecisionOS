@@ -150,3 +150,21 @@ describe("POST /api/datasources/postgres/commit — connector security (SSRF) + 
     expect(queryMock).not.toHaveBeenCalledWith(expect.stringMatching(/INSERT INTO data_sources/), expect.anything());
   });
 });
+
+describe("GET /api/datasources/:id/quality", () => {
+  it("sends the score as a number — Postgres NUMERIC arrives as a string, which made the UI show NaN%", async () => {
+    queryMock.mockResolvedValueOnce({
+      rows: [{ score: "100.0", issues: [{ code: "valid_revenue_pct", severity: "green", count: 10 }], stats: { rows: 10, duplicates: 0 }, created_at: "2026-09-20T17:42:23Z" }],
+    });
+    const res = await request(buildApp()).get("/api/datasources/ds-1/quality").set("Authorization", `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+    expect(res.body.score).toBe(100);
+    expect(typeof res.body.score).toBe("number");
+    expect(res.body.stats).toEqual({ rows: 10, duplicates: 0 });
+  });
+
+  it("404s when the source has no report yet", async () => {
+    const res = await request(buildApp()).get("/api/datasources/ds-1/quality").set("Authorization", `Bearer ${tokenA}`);
+    expect(res.status).toBe(404);
+  });
+});

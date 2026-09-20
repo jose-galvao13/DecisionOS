@@ -154,6 +154,10 @@ CREATE TABLE IF NOT EXISTS data_quality_reports (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_dq_data_source ON data_quality_reports(data_source_id);
+-- { rows, missingPct, duplicates, invalidIds, inconsistent } — what the Data
+-- quality cards show. Nullable: reports saved before this column existed
+-- simply don't have it, and the UI shows "—" for them instead of a fake 0.
+ALTER TABLE data_quality_reports ADD COLUMN IF NOT EXISTS stats JSONB;
 
 -- Foundation for roadmap #12 (full audit UI is FASE 5) — the table and a
 -- write helper exist now so every FASE-1 mutating action already logs.

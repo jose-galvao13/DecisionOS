@@ -1,5 +1,5 @@
 import React from "react";
-import { C } from "../../lib/theme";
+import { C, chartTooltip, barCursor } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { fmtK } from "../../lib/format";
 import { Card, KPI, SectionTitle, SourceBadge } from "../../components/ui";
@@ -28,7 +28,7 @@ function BusinessIntelligence({ analytics, sourceInfo }) {
               <CartesianGrid stroke={C.greyBorderSoft} horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
               <YAxis type="category" dataKey="region" tick={{ fontSize: 12, fill: C.textSecondary }} axisLine={false} tickLine={false} width={80} />
-              <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12 }} formatter={(v) => fmtK(v, locale)} />
+              <Tooltip {...chartTooltip} cursor={barCursor} formatter={(v) => fmtK(v, locale)} />
               <Bar dataKey="value" radius={[0, 6, 6, 0]} fill={C.blue} />
             </BarChart>
           </ResponsiveContainer>
@@ -40,7 +40,7 @@ function BusinessIntelligence({ analytics, sourceInfo }) {
               <CartesianGrid stroke={C.greyBorderSoft} vertical={false} />
               <XAxis dataKey="m" tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} width={40} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
-              <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12 }} formatter={(v) => fmtK(v, locale)} />
+              <Tooltip {...chartTooltip} formatter={(v) => fmtK(v, locale)} />
               <Line type="monotone" dataKey="revenue" stroke={C.blue} strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>

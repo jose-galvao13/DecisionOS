@@ -29,22 +29,16 @@ beforeEach(() => {
 });
 
 describe("Onboarding — choose step", () => {
-  it("renders both data-source options", () => {
+  it("offers Excel as the only data source (no database option)", () => {
     renderOnboarding();
     expect(screen.getByText("Excel", { exact: true })).toBeInTheDocument();
-    expect(screen.getByText("Base de dados", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(/base de dados|database/i)).not.toBeInTheDocument();
   });
 
   it("calls onFinish when the person chooses to use demo data instead", () => {
     const { onFinish } = renderOnboarding();
     fireEvent.click(screen.getByText(/dados de demonstração|demo data/i));
     expect(onFinish).toHaveBeenCalled();
-  });
-
-  it("shows the simulated-database explainer without ever attempting a real connection", () => {
-    renderOnboarding();
-    fireEvent.click(screen.getByText("Base de dados", { exact: true }));
-    expect(screen.getByText(/ainda não está disponível|not available/i)).toBeInTheDocument();
   });
 });
 

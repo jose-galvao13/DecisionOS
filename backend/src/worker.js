@@ -30,8 +30,8 @@ const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS || 1500);
 async function saveQualityReport(orgId, dataSourceId, quality) {
   const { randomUUID } = await import("crypto");
   await pool.query(
-    `INSERT INTO data_quality_reports (id, org_id, data_source_id, score, issues) VALUES ($1,$2,$3,$4,$5)`,
-    [randomUUID(), orgId, dataSourceId, quality.score, JSON.stringify(quality.issues)]
+    `INSERT INTO data_quality_reports (id, org_id, data_source_id, score, issues, stats) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [randomUUID(), orgId, dataSourceId, quality.score, JSON.stringify(quality.issues), JSON.stringify(quality.stats ?? null)]
   );
 }
 
@@ -70,7 +70,7 @@ async function runImport(job, { orgId, dataSourceId, rows, mapping }) {
   if (job.type !== "refresh_postgres") await setActiveDataSource(orgId, dataSourceId);
   invalidateOrgAnalyticsCache(orgId); // next dashboard/advisor/decisions call recomputes from the new data
 
-  return { ...result, dataQuality: { score: quality.score, issues: quality.issues } };
+  return { ...result, dataQuality: { score: quality.score, issues: quality.issues, stats: quality.stats } };
 }
 
 async function processImportExcel(job) {

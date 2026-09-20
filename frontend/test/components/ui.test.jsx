@@ -50,6 +50,24 @@ describe("Tooltip", () => {
     fireEvent.mouseLeave(screen.getByText("Hover me").parentElement);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
+
+  it("uses the theme's tooltip colors (not charcoal/white, which are the same shade in dark mode)", () => {
+    render(<Tooltip label="Some explanation"><span>Hover me</span></Tooltip>);
+    fireEvent.mouseEnter(screen.getByText("Hover me").parentElement);
+    const bubble = screen.getByRole("tooltip");
+    expect(bubble.style.background).toContain("--tooltip-bg");
+    expect(bubble.style.color).toContain("--tooltip-fg");
+  });
+
+  it("wraps long text inside a capped width, rendered in a portal so no parent can clip it", () => {
+    const long = "There is not enough variation in this dataset to fit an elasticity from — using a stated assumption (0.65), not a measured one.";
+    const { container } = render(<Tooltip label={long}><span>Hover me</span></Tooltip>);
+    fireEvent.mouseEnter(screen.getByText("Hover me").parentElement);
+    const bubble = screen.getByRole("tooltip");
+    expect(container.contains(bubble)).toBe(false); // portalled to <body>
+    expect(bubble.style.maxWidth).toContain("288px");
+    expect(bubble.className).not.toContain("whitespace-nowrap");
+  });
 });
 
 function ToastTrigger() {

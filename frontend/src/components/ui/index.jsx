@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { ArrowUpRight, ArrowDownRight, Info } from "lucide-react";
 import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
@@ -119,7 +120,7 @@ function ToastViewport({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   const toneMap = {
     green: { bg: C.greenSoft, fg: C.green }, red: { bg: C.redSoft, fg: C.red },
-    blue: { bg: C.blueSoft, fg: C.blue }, neutral: { bg: C.charcoal, fg: C.white },
+    blue: { bg: C.blueSoft, fg: C.blue }, neutral: { bg: C.charcoal, fg: C.surface },
   };
   return (
     <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 max-w-sm">
@@ -141,28 +142,80 @@ function ToastViewport({ toasts, onDismiss }) {
   );
 }
 
-// FASE 10 — minimal tooltip: no positioning library, just a title-like
-// hover bubble anchored above the trigger. Good enough for short labels
-// (KPI definitions, disabled-button reasons) without a new dependency.
+// FASE 10 — minimal tooltip: no positioning library, just a hover bubble.
+// Two problems the first version had (both visible on the simulator's "stated
+// assumption" info icon):
+//  1. Colors: the bubble used C.charcoal as background and C.white as text.
+//     In dark mode charcoal turns light and white stays white -> white text on
+//     a pale bubble. It now uses its own tooltip tokens (see lib/theme.jsx).
+//  2. Size/position: `whitespace-nowrap` + centered on the trigger meant long
+//     explanations were one very long line that ran off the left/right edge of
+//     the window. The bubble is now capped in width, wraps, is drawn in a
+//     portal with fixed positioning (so no ancestor's overflow can clip it)
+//     and is clamped to the viewport.
+const TOOLTIP_MARGIN = 8;
+const TOOLTIP_MAX_WIDTH = 288;
+
 function Tooltip({ label, children }) {
   const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState(null); // { left, top, placement }
+  const triggerRef = React.useRef(null);
+  const bubbleRef = React.useRef(null);
+  const id = React.useId();
+
+  const place = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    const bubble = bubbleRef.current;
+    if (!trigger || !bubble) return;
+    const t = trigger.getBoundingClientRect();
+    const b = bubble.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const above = t.top - b.height - TOOLTIP_MARGIN >= TOOLTIP_MARGIN; // room above? else flip below
+    const top = above ? t.top - b.height - TOOLTIP_MARGIN : t.bottom + TOOLTIP_MARGIN;
+    let left = t.left + t.width / 2 - b.width / 2;
+    left = Math.max(TOOLTIP_MARGIN, Math.min(left, vw - b.width - TOOLTIP_MARGIN));
+    setPos({ left, top });
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [open, label, place]);
+
   return (
     <span
+      ref={triggerRef}
       className="relative inline-flex"
+      aria-describedby={open ? id : undefined}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
     >
       {children}
-      {open && (
+      {open && createPortal(
         <span
+          ref={bubbleRef}
+          id={id}
           role="tooltip"
-          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded-lg text-xs whitespace-nowrap shadow-lg"
-          style={{ background: C.charcoal, color: C.white }}
+          className="fixed z-[100] px-3 py-2 rounded-lg text-xs leading-snug shadow-lg pointer-events-none"
+          style={{
+            left: pos?.left ?? 0,
+            top: pos?.top ?? 0,
+            width: "max-content",
+            maxWidth: `min(${TOOLTIP_MAX_WIDTH}px, calc(100vw - ${TOOLTIP_MARGIN * 2}px))`,
+            visibility: pos ? "visible" : "hidden", // measured first, shown once placed
+            background: C.tooltipBg,
+            color: C.tooltipFg,
+            border: `1px solid ${C.tooltipBorder}`,
+          }}
         >
           {label}
-        </span>
+        </span>,
+        document.body
       )}
     </span>
   );

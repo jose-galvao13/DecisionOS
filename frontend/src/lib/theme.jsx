@@ -31,6 +31,11 @@ const C = {
   green: "var(--green)", greenSoft: "var(--green-soft)",
   red: "var(--red)", redSoft: "var(--red-soft)",
   yellow: "var(--yellow)", yellowSoft: "var(--yellow-soft)",
+  // Hover bubbles (Tooltip component). Own tokens because "text on a dark
+  // bubble" is not the same role as C.charcoal/C.white: charcoal turns light
+  // in dark mode while C.white stays white, which put white text on a light
+  // bubble (unreadable) as soon as the dark theme was on.
+  tooltipBg: "var(--tooltip-bg)", tooltipFg: "var(--tooltip-fg)", tooltipBorder: "var(--tooltip-border)",
 };
 
 /** Alpha-blended "soft badge" backgrounds (e.g. a status pill using
@@ -46,6 +51,18 @@ const C = {
 function tint(color, pct = 15) {
   return `color-mix(in srgb, ${color} ${pct}%, transparent)`;
 }
+
+/** Props shared by every recharts <Tooltip>. recharts paints its bubble with
+ *  a hard-coded white background and doesn't set a text color, so in dark
+ *  mode the label inherited the (light) page text color and sat on white.
+ *  Spread onto <Tooltip {...chartTooltip} formatter={...} />. */
+const chartTooltip = {
+  contentStyle: { borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12, background: C.surface, color: C.charcoal },
+  labelStyle: { color: C.charcoal, fontWeight: 600 },
+  itemStyle: { color: C.charcoal },
+};
+/** Hover highlight behind a bar — recharts' default is a fixed light grey block. */
+const barCursor = { fill: tint(C.textMuted, 15) };
 
 /* ---------------------------------------------------------------
    THEME VARIABLES + base styles. Rendered via <style>{fontImport}</style>
@@ -78,6 +95,7 @@ const fontImport = `
     --green: #157A4F; --green-soft: #E7F5EE;
     --red: #B3382A; --red-soft: #FBEAE7;
     --yellow: #A8690A; --yellow-soft: #FCF1E1;
+    --tooltip-bg: #1B2431; --tooltip-fg: #FFFFFF; --tooltip-border: #1B2431;
   }
   /* The sidebar's navy tones are intentionally identical in both
      themes (it's already a dark rail in light mode) — only surfaces,
@@ -88,6 +106,7 @@ const fontImport = `
     --charcoal: #E8ECF4;
     --text-secondary: #A7B1C4; --text-muted: #6E7893;
     --blue-soft: #15233F; --green-soft: #11291F; --red-soft: #2E1917; --yellow-soft: #2F250F;
+    --tooltip-bg: #232E47; --tooltip-fg: #E8ECF4; --tooltip-border: #33415F;
   }
   html, body { background: var(--grey-bg); }
   /* Sensible defaults so anything that doesn't set its own colors still
@@ -181,4 +200,4 @@ function useThemeMode() {
   return useContext(ThemeModeContext);
 }
 
-export { C, fontImport, tint, ThemeModeProvider, useThemeMode };
+export { C, fontImport, tint, chartTooltip, barCursor, ThemeModeProvider, useThemeMode };

@@ -6,7 +6,7 @@ import {
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
-import { C } from "../../lib/theme";
+import { C, chartTooltip, barCursor } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { fmtK, pct } from "../../lib/format";
 import { computeAlerts } from "../../lib/metrics";
@@ -260,7 +260,7 @@ export default function ReportsPage({ analytics, sourceInfo }) {
                 <CartesianGrid stroke={C.greyBorderSoft} vertical={false} />
                 <XAxis dataKey="m" tick={{ fontSize: 11, fill: C.textMuted }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: C.textMuted }} axisLine={false} tickLine={false} width={38} tickFormatter={(v) => `${Math.round(v / 1000)}K`} />
-                <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.greyBorder}`, fontSize: 12 }} formatter={(v) => fmtK(v, locale)} />
+                <Tooltip {...chartTooltip} cursor={barCursor} formatter={(v) => fmtK(v, locale)} />
                 <Bar dataKey={t("series.revenue")} fill={C.blue} radius={[3, 3, 0, 0]} isAnimationActive={false} />
                 <Bar dataKey={t("series.profit")} fill={C.green} radius={[3, 3, 0, 0]} isAnimationActive={false} />
               </BarChart>
