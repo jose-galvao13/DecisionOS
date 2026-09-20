@@ -87,8 +87,11 @@ function Overview({ analytics, sourceInfo, execMode, filters, user }) {
 
   const pieColors = [C.blue, "#5C93F0", "#8FB4F5", "#BFD4F9", C.greyBorder];
   const dimLabel = (d) => (d === "Produto" ? t("dim.product") : d === "Região" ? t("dim.region") : d === "Canal" ? t("dim.channel") : d);
+  // Greets the organization the person registered ("Boa tarde, Acme Lda");
+  // falls back to their first name, then to a plain greeting.
   const firstName = (user?.name || "").trim().split(/\s+/)[0];
-  const greeting = firstName ? `${t(greetingKey())}, ${firstName}` : t(greetingKey());
+  const who = (user?.orgName || "").trim() || firstName;
+  const greeting = who ? `${t(greetingKey())}, ${who}` : t(greetingKey());
   const alerts = useMemo(() => computeAlerts(analytics), [analytics]);
   const copyFor = (a) => alertCopy(a, t, locale);
 

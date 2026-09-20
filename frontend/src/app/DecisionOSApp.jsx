@@ -9,6 +9,7 @@ import { useLang } from "../lib/i18n";
 import { apiFetch, apiUpload, pollJob } from "../api/client";
 import { generateDemoTransactions } from "../lib/demoData";
 import { computeAnalytics, filterTransactions, monthLabel } from "../lib/metrics";
+import { normalizeQuality } from "../lib/quality";
 import { Card, useToast, EmptyState } from "../components/ui";
 import Onboarding from "../components/Onboarding";
 import FilterBar from "../components/FilterBar";
@@ -59,6 +60,10 @@ function hydrateAnalytics(data, locale) {
   };
 }
 
+// Mirrors backend requireMinRole("manager") on upload / activate / delete.
+const MANAGER_AND_ABOVE = ["manager", "finance", "admin", "owner"];
+const canManageData = (role) => MANAGER_AND_ABOVE.includes(role);
+
 function DecisionOSApp({ user, onLogout }) {
   const { t, lang, locale } = useLang();
   const toast = useToast();
@@ -74,10 +79,37 @@ function DecisionOSApp({ user, onLogout }) {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState("");
   const [checkingExisting, setCheckingExisting] = useState(true);
-  const [replaceJob, setReplaceJob] = useState(null); // FASE 8: progress while a replace-data job runs
+  const [replaceJob, setReplaceJob] = useState(null); // FASE 8: progress while an import job runs
+  const [dataSources, setDataSources] = useState([]); // every file/source this org has uploaded
+  const [busySourceId, setBusySourceId] = useState(null); // source being activated/removed right now
   const replaceInput = useRef(null);
 
   useEffect(() => { setSourceInfo((s) => (s.type === "demo" ? { ...s, rows: demoTransactions.length } : s)); }, [demoTransactions]);
+
+  const DEFAULT_FILTERS = { period: "all", product: "all", region: "all", channel: "all" };
+  const sourceInfoFrom = (d) => ({ type: d.type, name: d.name, rows: d.row_count || 0, dataSourceId: d.id, lastUpdated: d.last_sync_at });
+
+  // Refreshes the list of uploaded files/sources. Returns null if it couldn't be loaded.
+  const loadSources = async () => {
+    try {
+      const data = await apiFetch("/api/datasources");
+      const list = data.dataSources || [];
+      setDataSources(list);
+      return list;
+    } catch {
+      return null;
+    }
+  };
+
+  // Data-quality report of one source. Without this the quality pages were
+  // empty after every page reload, because it was only ever set right after an import.
+  const loadQuality = async (dataSourceId) => {
+    try {
+      setQuality(normalizeQuality(await apiFetch(`/api/datasources/${dataSourceId}/quality`)));
+    } catch {
+      setQuality(null);
+    }
+  };
 
   // On first load, if this org already has a data source connected from a
   // previous session, pick it up automatically instead of forcing the
@@ -92,10 +124,14 @@ function DecisionOSApp({ user, onLogout }) {
         // status 'error' (or 'syncing') and 0 rows; treating that as
         // "connected" hid the onboarding modal and left the user with an
         // empty dashboard and no obvious way to upload again.
-        const latest = data.dataSources?.find((d) => d.status === "connected" && Number(d.row_count) > 0);
+        const list = data.dataSources || [];
+        if (!cancelled) setDataSources(list);
+        // The backend says which one is active (is_active); the fallback covers a backend that predates it.
+        const latest = list.find((d) => d.is_active) || list.find((d) => d.status === "connected" && Number(d.row_count) > 0);
         if (!cancelled && latest) {
-          setSourceInfo({ type: latest.type, name: latest.name, rows: latest.row_count || 0, dataSourceId: latest.id, lastUpdated: latest.last_sync_at });
+          setSourceInfo(sourceInfoFrom(latest));
           setShowOnboarding(false);
+          loadQuality(latest.id);
         }
       } catch {
         // no data sources yet (or listing failed) — demo mode stays as-is
@@ -122,7 +158,7 @@ function DecisionOSApp({ user, onLogout }) {
       .catch((e) => { if (!cancelled) { setAnalyticsError(e.message); setBackendAnalytics(null); } })
       .finally(() => { if (!cancelled) setAnalyticsLoading(false); });
     return () => { cancelled = true; };
-  }, [isBackendMode, filters, locale]);
+  }, [isBackendMode, filters, locale, sourceInfo.dataSourceId]);
 
   // Demo-mode analytics: computed locally, exactly as before.
   const demoAnalytics = useMemo(
@@ -133,9 +169,60 @@ function DecisionOSApp({ user, onLogout }) {
   const analytics = isBackendMode ? backendAnalytics : demoAnalytics;
 
   const handleDataReady = ({ sourceInfo: s, quality: q }) => {
-    setSourceInfo({ ...s, lastUpdated: new Date() }); setQuality(q);
-    setFilters({ period: "all", product: "all", region: "all", channel: "all" });
+    setSourceInfo({ ...s, lastUpdated: new Date() }); setQuality(normalizeQuality(q));
+    setFilters(DEFAULT_FILTERS);
+    loadSources();
   };
+
+  // Switch which file the whole app looks at. The backend re-points every
+  // analytics query to it; here we reset the per-file view state.
+  const activateSource = async (src) => {
+    setBusySourceId(src.id);
+    try {
+      await apiFetch(`/api/datasources/${src.id}/activate`, { method: "POST" });
+      setSourceInfo(sourceInfoFrom(src));
+      setFilters(DEFAULT_FILTERS);
+      setBackendAnalytics(null); setAnalyticsLoading(true); // show the loader, not the previous file's numbers
+      await Promise.all([loadQuality(src.id), loadSources()]);
+      toast.success(t("data.activated", { name: src.name }));
+    } catch (e) {
+      toast.error(e.message || t("onboarding.error.readFile"));
+    } finally {
+      setBusySourceId(null);
+    }
+  };
+
+  // Remove a file and its imported data. If it was the one in use, move to
+  // whichever the backend falls back to; with none left, back to the upload screen.
+  const removeSource = async (src) => {
+    if (!window.confirm(t("data.removeConfirm", { name: src.name }))) return;
+    setBusySourceId(src.id);
+    try {
+      const res = await apiFetch(`/api/datasources/${src.id}`, { method: "DELETE" });
+      const list = await loadSources();
+      if (src.id === sourceInfo.dataSourceId) {
+        const next = res.activeDataSourceId && list?.find((d) => d.id === res.activeDataSourceId);
+        if (next) {
+          setSourceInfo(sourceInfoFrom(next));
+          setFilters(DEFAULT_FILTERS);
+          setBackendAnalytics(null); setAnalyticsLoading(true);
+          loadQuality(next.id);
+        } else {
+          setSourceInfo({ type: "demo", name: "", rows: demoTransactions.length });
+          setQuality(null); setBackendAnalytics(null);
+          setShowOnboarding(true);
+        }
+      }
+      toast.success(t("data.removed", { name: src.name }));
+    } catch (e) {
+      toast.error(e.message || t("onboarding.error.readFile"));
+    } finally {
+      setBusySourceId(null);
+    }
+  };
+
+  // Opening the Data page shows fresh statuses (e.g. a file that was still importing).
+  useEffect(() => { if (isBackendMode && view === "data") loadSources(); }, [isBackendMode, view]);
 
   // Quick "replace data" from the Data page — same backend upload path as
   // onboarding, but auto-confirms the backend's suggested mapping instead
@@ -159,8 +246,9 @@ function DecisionOSApp({ user, onLogout }) {
       });
       const finished = await pollJob(queued.jobId, { onProgress: setReplaceJob });
       setSourceInfo({ type: "excel", name: file.name, rows: finished.result.imported, dataSourceId: queued.dataSourceId, lastUpdated: new Date() });
-      setQuality(finished.result.dataQuality);
-      setFilters({ period: "all", product: "all", region: "all", channel: "all" });
+      setQuality(normalizeQuality(finished.result.dataQuality));
+      setFilters(DEFAULT_FILTERS);
+      loadSources();
       toast.success(t("data.replaceSuccess", { n: finished.result.imported }) || `Imported ${finished.result.imported} rows.`);
     } catch (e) {
       const message = e.message || t("onboarding.error.readFile");
@@ -197,7 +285,7 @@ function DecisionOSApp({ user, onLogout }) {
       case "sim": return <DecisionSimulator filters={filters} sourceInfo={sourceInfo} />;
       case "advisor": return <AIAdvisor analytics={analytics} sourceInfo={sourceInfo} filters={filters} />;
       case "decisionLog": return <DecisionLogPage user={user} />;
-      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onReplace={() => replaceInput.current?.click()} replaceJob={replaceJob} />;
+      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onAdd={() => replaceInput.current?.click()} replaceJob={replaceJob} sources={dataSources} activeId={sourceInfo.dataSourceId} onActivate={activateSource} onRemove={removeSource} busyId={busySourceId} canManage={canManageData(user?.role)} />;
       case "dataQuality": return <DataQualityCenter quality={quality} sourceInfo={sourceInfo} analytics={analytics} />;
       case "products": return <ProductsPage analytics={analytics} sourceInfo={sourceInfo} />;
       case "reports": return <ReportsPage analytics={analytics} sourceInfo={sourceInfo} />;
@@ -264,7 +352,7 @@ function DecisionOSApp({ user, onLogout }) {
               </div>
             }
           >
-            {renderView()}
+            <React.Fragment key={sourceInfo.dataSourceId || "demo"}>{renderView()}</React.Fragment>
           </Suspense>
         </main>
       </div>
