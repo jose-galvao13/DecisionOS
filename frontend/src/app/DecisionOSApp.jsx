@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { C, fontImport } from "../lib/theme";
 import { useLang } from "../lib/i18n";
-import { apiFetch, apiUpload, pollJob } from "../api/client";
+import { apiFetch, apiUpload, pollJob, apiDownload, saveBlob } from "../api/client";
 import { generateDemoTransactions } from "../lib/demoData";
 import { computeAnalytics, filterTransactions, monthLabel } from "../lib/metrics";
 import { normalizeQuality } from "../lib/quality";
@@ -82,6 +82,7 @@ function DecisionOSApp({ user, onLogout }) {
   const [replaceJob, setReplaceJob] = useState(null); // FASE 8: progress while an import job runs
   const [dataSources, setDataSources] = useState([]); // every file/source this org has uploaded
   const [busySourceId, setBusySourceId] = useState(null); // source being activated/removed right now
+  const [exportingSourceId, setExportingSourceId] = useState(null); // source being exported to Excel right now
   const replaceInput = useRef(null);
 
   useEffect(() => { setSourceInfo((s) => (s.type === "demo" ? { ...s, rows: demoTransactions.length } : s)); }, [demoTransactions]);
@@ -221,6 +222,36 @@ function DecisionOSApp({ user, onLogout }) {
     }
   };
 
+  // Rename a file. Resolves true/false so the row knows whether to leave edit mode.
+  const renameSource = async (src, name) => {
+    try {
+      const res = await apiFetch(`/api/datasources/${src.id}`, { method: "PATCH", body: { name } });
+      await loadSources();
+      // the header pill and the Data Quality "Source" card read the name from sourceInfo
+      if (src.id === sourceInfo.dataSourceId) setSourceInfo((s) => ({ ...s, name: res.name }));
+      toast.success(t("data.renamed", { name: res.name }));
+      return true;
+    } catch (e) {
+      toast.error(e.message || t("onboarding.error.readFile"));
+      return false;
+    }
+  };
+
+  // Download what was imported from a file as .xlsx (the original upload isn't kept).
+  const exportSource = async (src) => {
+    setExportingSourceId(src.id);
+    try {
+      const blob = await apiDownload(`/api/datasources/${src.id}/export`);
+      const base = src.name.replace(/\.(xlsx|xls|csv)$/i, "");
+      saveBlob(blob, `${base}_export.xlsx`);
+      toast.success(t("data.exported", { name: src.name }));
+    } catch (e) {
+      toast.error(e.message || t("onboarding.error.readFile"));
+    } finally {
+      setExportingSourceId(null);
+    }
+  };
+
   // Opening the Data page shows fresh statuses (e.g. a file that was still importing).
   useEffect(() => { if (isBackendMode && view === "data") loadSources(); }, [isBackendMode, view]);
 
@@ -285,7 +316,7 @@ function DecisionOSApp({ user, onLogout }) {
       case "sim": return <DecisionSimulator filters={filters} sourceInfo={sourceInfo} />;
       case "advisor": return <AIAdvisor analytics={analytics} sourceInfo={sourceInfo} filters={filters} />;
       case "decisionLog": return <DecisionLogPage user={user} />;
-      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onAdd={() => replaceInput.current?.click()} replaceJob={replaceJob} sources={dataSources} activeId={sourceInfo.dataSourceId} onActivate={activateSource} onRemove={removeSource} busyId={busySourceId} canManage={canManageData(user?.role)} />;
+      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onAdd={() => replaceInput.current?.click()} replaceJob={replaceJob} sources={dataSources} activeId={sourceInfo.dataSourceId} onActivate={activateSource} onRemove={removeSource} onRename={renameSource} onExport={exportSource} busyId={busySourceId} exportingId={exportingSourceId} canManage={canManageData(user?.role)} />;
       case "dataQuality": return <DataQualityCenter quality={quality} sourceInfo={sourceInfo} analytics={analytics} />;
       case "products": return <ProductsPage analytics={analytics} sourceInfo={sourceInfo} />;
       case "reports": return <ReportsPage analytics={analytics} sourceInfo={sourceInfo} />;

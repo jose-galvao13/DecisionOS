@@ -1,8 +1,9 @@
 import React from "react";
-import { Database, FileSpreadsheet, Plus, ShieldCheck, Trash2, Check, Loader2 } from "lucide-react";
+import { Database, FileSpreadsheet, Plus, ShieldCheck, Trash2, Check, Loader2, Pencil, Info, Download, X } from "lucide-react";
 import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
-import { Card, SectionTitle, JobProgress } from "../../components/ui";
+import { Card, SectionTitle, JobProgress, ActionMenu } from "../../components/ui";
+import SourceDetailsModal from "./SourceDetailsModal";
 
 /* ---------------------------------------------------------------
    DATA PAGE — every file / source the organization has uploaded.
@@ -20,11 +21,27 @@ function statusOf(source, t, locale) {
   return { color: C.green, text: t("data.connectedRows", { n: source.row_count ?? 0 }) + when };
 }
 
-function SourceRow({ source, active, busy, canManage, onActivate, onRemove }) {
+function SourceRow({ source, active, busy, exporting, canManage, hasList, onActivate, onRemove, onRename, onExport, onDetails }) {
   const { t, locale } = useLang();
   const status = statusOf(source, t, locale);
   const usable = source.status === "connected" && Number(source.row_count) > 0;
   const Icon = source.type === "excel" ? FileSpreadsheet : Database;
+
+  // Rename happens in place: the name turns into a text field.
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(source.name);
+  const [saving, setSaving] = React.useState(false);
+  const startEdit = () => { setDraft(source.name); setEditing(true); };
+  const cancelEdit = () => setEditing(false);
+  const trimmed = draft.trim();
+  const saveEdit = async () => {
+    if (!trimmed || saving) return;
+    if (trimmed === source.name) return cancelEdit();
+    setSaving(true);
+    const ok = await onRename(source, trimmed); // resolves false (and toasts) on failure -> stay in edit mode
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
 
   return (
     <div
@@ -32,28 +49,68 @@ function SourceRow({ source, active, busy, canManage, onActivate, onRemove }) {
       className="flex items-center justify-between gap-3 p-4 rounded-xl"
       style={{ border: `1px solid ${active ? C.blue : C.greyBorder}`, background: active ? C.blueSoft : "transparent" }}
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: active ? C.surface : C.blueSoft }}>
           <Icon size={18} color={C.blue} />
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold truncate" style={{ color: C.charcoal }}>{source.name}</span>
-            {active && (
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ background: C.blue, color: C.white }}>
-                {t("data.active")}
-              </span>
-            )}
-          </div>
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={draft}
+                maxLength={200}
+                aria-label={t("data.renameLabel")}
+                onChange={(e) => setDraft(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); saveEdit(); }
+                  else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+                }}
+                disabled={saving}
+                className="min-w-0 flex-1 text-sm font-semibold px-2.5 py-1.5 rounded-lg outline-none"
+                style={{ border: `1px solid ${C.blue}`, color: C.charcoal }}
+              />
+              <button
+                onClick={saveEdit}
+                disabled={!trimmed || saving}
+                aria-label={t("data.save")}
+                title={t("data.save")}
+                className="p-2 rounded-lg disabled:opacity-40"
+                style={{ background: C.blue, color: C.white }}
+              >
+                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              </button>
+              <button
+                onClick={cancelEdit}
+                disabled={saving}
+                aria-label={t("data.cancel")}
+                title={t("data.cancel")}
+                className="p-2 rounded-lg disabled:opacity-40"
+                style={{ border: `1px solid ${C.greyBorder}`, color: C.textSecondary }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="font-semibold truncate" style={{ color: C.charcoal }}>{source.name}</span>
+              {active && (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ background: C.blue, color: C.white }}>
+                  {t("data.active")}
+                </span>
+              )}
+            </div>
+          )}
           <div className="text-sm flex items-center gap-1.5 mt-0.5" style={{ color: C.textSecondary }}>
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: status.color }} /> {status.text}
           </div>
         </div>
       </div>
 
-      {canManage && (
+      {hasList && !editing && (
         <div className="flex items-center gap-2 shrink-0">
-          {!active && usable && (
+          {canManage && !active && usable && (
             <button
               onClick={() => onActivate(source)}
               disabled={busy}
@@ -63,24 +120,26 @@ function SourceRow({ source, active, busy, canManage, onActivate, onRemove }) {
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {t("data.useFile")}
             </button>
           )}
-          <button
-            onClick={() => onRemove(source)}
-            disabled={busy}
-            title={t("data.remove")}
-            aria-label={`${t("data.remove")} ${source.name}`}
-            className="p-2 rounded-lg disabled:opacity-50"
-            style={{ border: `1px solid ${C.greyBorder}`, color: C.textSecondary }}
-          >
-            <Trash2 size={14} />
-          </button>
+          <ActionMenu
+            label={t("data.moreOptions", { name: source.name })}
+            busy={busy || exporting}
+            disabled={busy || exporting}
+            items={[
+              { key: "rename", label: t("data.rename"), icon: Pencil, onSelect: startEdit, hidden: !canManage },
+              { key: "details", label: t("data.viewDetails"), icon: Info, onSelect: () => onDetails(source) },
+              { key: "export", label: t("data.export"), icon: Download, onSelect: () => onExport(source), hidden: !canManage || !usable },
+              { key: "remove", label: t("data.remove"), icon: Trash2, onSelect: () => onRemove(source), danger: true, separatorBefore: true, hidden: !canManage },
+            ]}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources = [], activeId, onActivate, onRemove, busyId, canManage = true }) {
+function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources = [], activeId, onActivate, onRemove, onRename, onExport, busyId, exportingId, canManage = true }) {
   const { t } = useLang();
+  const [detailsFor, setDetailsFor] = React.useState(null);
 
   // If the list hasn't loaded (or the backend is older than the list feature)
   // still show the file that is in use, so the page is never empty.
@@ -133,9 +192,14 @@ function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources =
               source={s}
               active={s.id === currentId}
               busy={busyId === s.id}
-              canManage={canManage && sources.length > 0}
+              exporting={exportingId === s.id}
+              canManage={canManage}
+              hasList={sources.length > 0}
               onActivate={onActivate}
               onRemove={onRemove}
+              onRename={onRename}
+              onExport={onExport}
+              onDetails={setDetailsFor}
             />
           ))}
         </div>
@@ -153,6 +217,8 @@ function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources =
           </div>
         )}
       </Card>
+
+      {detailsFor && <SourceDetailsModal source={detailsFor} active={detailsFor.id === currentId} onClose={() => setDetailsFor(null)} />}
 
       {quality && (
         <Card className="p-6">

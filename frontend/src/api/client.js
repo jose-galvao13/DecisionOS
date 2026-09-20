@@ -54,6 +54,25 @@ async function apiUpload(path, formData) {
   return handleApiResponse(res);
 }
 
+// Authenticated file download (the Bearer token can't be sent by a plain
+// <a href>, so the file is fetched here and handed to the browser as a Blob).
+async function apiDownload(path) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  if (!res.ok) await handleApiResponse(res); // throws with the server's message / signs out on 401
+  return res.blob();
+}
+// Saves a Blob through a temporary link, and only revokes the URL afterwards.
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /* ---------------------------------------------------------------
    FASE 8 — job polling. Import/refresh endpoints now return 202 +
    { jobId, status: 'queued' } instead of blocking until the data is
@@ -74,4 +93,4 @@ async function pollJob(jobId, { onProgress, intervalMs = 1200, timeoutMs = 10 * 
   }
 }
 
-export { API_BASE, TOKEN_KEY, getToken, setToken, authHeaders, handleApiResponse, apiFetch, apiUpload, pollJob };
+export { API_BASE, TOKEN_KEY, getToken, setToken, authHeaders, handleApiResponse, apiFetch, apiUpload, apiDownload, saveBlob, pollJob };

@@ -1,6 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, ArrowDownRight, Info } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, Info, MoreHorizontal, Loader2 } from "lucide-react";
 import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 
@@ -221,6 +221,127 @@ function Tooltip({ label, children }) {
   );
 }
 
+// "⋯" button that opens a small menu of actions (rename, export, remove…).
+// Drawn in a portal with fixed positioning — like Tooltip — so a card with
+// overflow:hidden can't clip it, and it flips upwards near the bottom of the
+// window. Closes on Esc, outside click, scroll, resize or after choosing.
+// items: [{ key, label, icon, onSelect, danger?, disabled?, hidden?, separatorBefore? }]
+const MENU_MARGIN = 8;
+
+function ActionMenu({ label, items, busy = false, disabled = false }) {
+  const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState(null);
+  const buttonRef = React.useRef(null);
+  const menuRef = React.useRef(null);
+  const visible = items.filter((i) => !i.hidden);
+
+  const close = React.useCallback((returnFocus = false) => {
+    setOpen(false);
+    if (returnFocus) buttonRef.current?.focus();
+  }, []);
+
+  React.useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const b = buttonRef.current.getBoundingClientRect();
+    const m = menuRef.current.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const below = b.bottom + 6 + m.height <= vh - MENU_MARGIN;
+    const top = below ? b.bottom + 6 : Math.max(MENU_MARGIN, b.top - 6 - m.height);
+    const left = Math.max(MENU_MARGIN, Math.min(b.right - m.width, vw - m.width - MENU_MARGIN)); // right edges aligned
+    setPos({ top, left });
+  }, [open]);
+
+  // Focus the first item once the menu is actually visible (a visibility:hidden
+  // element can't take focus, so this can't happen in the layout effect above).
+  const placed = pos !== null;
+  React.useEffect(() => {
+    if (open && placed) menuRef.current?.querySelector("button:not([disabled])")?.focus();
+  }, [open, placed]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e) => {
+      if (!menuRef.current?.contains(e.target) && !buttonRef.current?.contains(e.target)) close();
+    };
+    const onScrollOrResize = () => close();
+    document.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [open, close]);
+
+  const onMenuKeyDown = (e) => {
+    const buttons = [...menuRef.current.querySelectorAll("button:not([disabled])")];
+    const i = buttons.indexOf(document.activeElement);
+    if (e.key === "Escape") { e.preventDefault(); close(true); }
+    else if (e.key === "Tab") close();
+    else if (e.key === "ArrowDown") { e.preventDefault(); buttons[(i + 1) % buttons.length]?.focus(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); buttons[(i - 1 + buttons.length) % buttons.length]?.focus(); }
+    else if (e.key === "Home") { e.preventDefault(); buttons[0]?.focus(); }
+    else if (e.key === "End") { e.preventDefault(); buttons[buttons.length - 1]?.focus(); }
+  };
+
+  if (!visible.length) return null;
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label={label}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className="p-2 rounded-lg disabled:opacity-50"
+        style={{ border: `1px solid ${C.greyBorder}`, color: C.textSecondary, background: open ? C.greyBg : "transparent" }}
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={14} />}
+      </button>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={label}
+          onKeyDown={onMenuKeyDown}
+          className="fixed z-[90] min-w-[200px] py-1.5 rounded-xl shadow-lg"
+          style={{
+            top: pos?.top ?? 0, left: pos?.left ?? 0,
+            visibility: pos ? "visible" : "hidden", // measured first, shown once placed
+            background: C.surface, border: `1px solid ${C.greyBorder}`,
+          }}
+        >
+          {visible.map((item) => {
+            const Icon = item.icon;
+            return (
+              <React.Fragment key={item.key}>
+                {item.separatorBefore && <div className="my-1.5" role="separator" style={{ borderTop: `1px solid ${C.greyBorderSoft}` }} />}
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={item.disabled}
+                  onClick={() => { close(); item.onSelect(); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left outline-none disabled:opacity-40 hover:bg-[var(--grey-bg)] focus:bg-[var(--grey-bg)]"
+                  style={{ color: item.danger ? C.red : C.charcoal }}
+                >
+                  {Icon && <Icon size={15} />}
+                  {item.label}
+                </button>
+              </React.Fragment>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 // FASE 10 — consistent empty/error state block, so every page stops
 // hand-rolling its own centered icon+text layout (Overview, DataQuality,
 // DataSources, etc. each did their own slightly different version).
@@ -246,4 +367,4 @@ function Modal({ children, wide, narrow }) {
 }
 
 
-export { Pill, Card, KPI, SectionTitle, SourceBadge, Modal, JobProgress, ToastProvider, useToast, Tooltip, EmptyState };
+export { Pill, Card, KPI, SectionTitle, SourceBadge, Modal, JobProgress, ToastProvider, useToast, Tooltip, EmptyState, ActionMenu };

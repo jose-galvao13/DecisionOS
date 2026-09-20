@@ -324,6 +324,117 @@ router.delete("/:id", requireMinRole("manager"), async (req, res) => {
   res.json({ deleted: true, activeDataSourceId: await getActiveDataSourceId(req.user.orgId) });
 });
 
+// Everything the "Details" dialog shows about one file. Explicit column list on
+// purpose: data_sources also holds connection_config (encrypted credentials for
+// database-type sources), which must never leave the server.
+router.get("/:id", async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT ds.id, ds.name, ds.type, ds.status, ds.source_schema, ds.source_table, ds.column_mapping,
+            ds.row_count, ds.last_sync_at, ds.created_at, u.name AS created_by_name
+     FROM data_sources ds LEFT JOIN users u ON u.id = ds.created_by
+     WHERE ds.id = $1 AND ds.org_id = $2`,
+    [req.params.id, req.user.orgId]
+  );
+  if (!rows.length) return res.status(404).json({ error: "data source not found" });
+  const s = rows[0];
+  const { rows: range } = await pool.query(
+    `SELECT to_char(MIN(date), 'YYYY-MM-DD') AS date_from, to_char(MAX(date), 'YYYY-MM-DD') AS date_to
+     FROM transactions WHERE org_id = $1 AND data_source_id = $2`,
+    [req.user.orgId, s.id]
+  );
+  res.json({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    status: s.status,
+    rowCount: Number(s.row_count),
+    createdAt: s.created_at,
+    lastSyncAt: s.last_sync_at,
+    createdByName: s.created_by_name || null,
+    columnMapping: s.column_mapping || {},
+    dateRange: { from: range[0]?.date_from || null, to: range[0]?.date_to || null },
+  });
+});
+
+// Rename a file/source. Only the label changes — the imported data, the
+// mapping and the quality report stay exactly as they were.
+const MAX_SOURCE_NAME_LENGTH = 200;
+router.patch("/:id", requireMinRole("manager"), async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (!name) return res.status(400).json({ error: "name is required" });
+  if (name.length > MAX_SOURCE_NAME_LENGTH) {
+    return res.status(400).json({ error: `name must be at most ${MAX_SOURCE_NAME_LENGTH} characters` });
+  }
+  const { rows: found } = await pool.query(`SELECT id, name FROM data_sources WHERE id = $1 AND org_id = $2`, [req.params.id, req.user.orgId]);
+  if (!found.length) return res.status(404).json({ error: "data source not found" });
+  if (found[0].name !== name) {
+    await pool.query(`UPDATE data_sources SET name = $1 WHERE id = $2 AND org_id = $3`, [name, found[0].id, req.user.orgId]);
+    await writeAudit({
+      orgId: req.user.orgId, userId: req.user.id, action: "data_source.renamed",
+      objectType: "data_source", objectId: found[0].id,
+      before: { name: found[0].name }, after: { name },
+    });
+  }
+  res.json({ id: found[0].id, name });
+});
+
+// Export what was imported from this file as an .xlsx. The original upload
+// isn't kept (see /refresh below), so this is the way to get the data back out —
+// e.g. to keep a copy of a file before removing it, or to check what the
+// unified model actually holds. .xlsx rather than .csv on purpose: Excel in a
+// Portuguese locale expects ';' and ',' decimals, so a plain CSV opens as one
+// column. Restricted to managers: it is the raw data, not an aggregate.
+const EXPORT_COLUMNS = [
+  ["date", "Date"], ["customer", "Customer"], ["product", "Product"], ["region", "Region"], ["channel", "Channel"],
+  ["quantity", "Quantity"], ["unit_price", "Unit price"], ["gross_revenue", "Gross revenue"], ["discount", "Discount"],
+  ["net_revenue", "Net revenue"], ["cost", "Cost"], ["gross_profit", "Gross profit"], ["currency", "Currency"],
+];
+const NUMERIC_EXPORT_FIELDS = new Set(["quantity", "unit_price", "gross_revenue", "discount", "net_revenue", "cost", "gross_profit"]);
+
+router.get("/:id/export", requireMinRole("manager"), async (req, res) => {
+  const { rows: found } = await pool.query(`SELECT id, name, row_count FROM data_sources WHERE id = $1 AND org_id = $2`, [req.params.id, req.user.orgId]);
+  if (!found.length) return res.status(404).json({ error: "data source not found" });
+  const source = found[0];
+
+  const { rows } = await pool.query(
+    `SELECT to_char(t.date, 'YYYY-MM-DD') AS date, c.name AS customer, p.name AS product, r.name AS region, ch.name AS channel,
+            t.quantity, t.unit_price, t.gross_revenue, t.discount, t.net_revenue, t.cost, t.gross_profit, t.currency
+     FROM transactions t
+     LEFT JOIN customers c ON c.id = t.customer_id
+     LEFT JOIN products p ON p.id = t.product_id
+     LEFT JOIN regions r ON r.id = t.region_id
+     LEFT JOIN channels ch ON ch.id = t.channel_id
+     WHERE t.org_id = $1 AND t.data_source_id = $2
+     ORDER BY t.date, t.id
+     LIMIT $3`,
+    [req.user.orgId, source.id, MAX_IMPORT_ROWS]
+  );
+
+  // node-postgres returns NUMERIC as strings; write real numbers so Excel can sum them.
+  const data = rows.map((row) => {
+    const out = {};
+    for (const [field, header] of EXPORT_COLUMNS) {
+      const v = row[field];
+      out[header] = v == null ? null : NUMERIC_EXPORT_FIELDS.has(field) ? Number(v) : v;
+    }
+    return out;
+  });
+  const sheet = XLSX.utils.json_to_sheet(data, { header: EXPORT_COLUMNS.map(([, header]) => header) });
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Transactions");
+  const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" });
+
+  const base = source.name.replace(/\.(xlsx|xls|csv)$/i, "").replace(/[\\/:*?"<>|\r\n]+/g, "_").trim() || "export";
+  const filename = `${base}_export.xlsx`;
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="export.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  await writeAudit({
+    orgId: req.user.orgId, userId: req.user.id, action: "data_source.exported",
+    objectType: "data_source", objectId: source.id, after: { name: source.name, rows: rows.length },
+  });
+  res.send(buffer);
+});
+
 // FASE 8 progress polling — the frontend calls this every ~1.5s while a
 // job is queued/running and stops once status is completed/failed.
 router.get("/jobs/:jobId", async (req, res) => {

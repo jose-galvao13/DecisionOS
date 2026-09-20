@@ -168,3 +168,93 @@ describe("GET /api/datasources/:id/quality", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("GET /api/datasources/:id — details", () => {
+  it("returns the mapping, period and counts — and never the connection credentials", async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{
+        id: "ds-1", name: "vendas.xlsx", type: "excel", status: "connected", source_schema: null, source_table: null,
+        column_mapping: { date: "Data", revenue: "Receita" }, row_count: 958, last_sync_at: "2026-09-20T17:42:23Z",
+        created_at: "2026-09-20T17:40:00Z", created_by_name: "Maria",
+      }] })
+      .mockResolvedValueOnce({ rows: [{ date_from: "2024-01-01", date_to: "2024-12-31" }] });
+    const res = await request(buildApp()).get("/api/datasources/ds-1").set("Authorization", `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      id: "ds-1", name: "vendas.xlsx", rowCount: 958, createdByName: "Maria",
+      columnMapping: { date: "Data", revenue: "Receita" }, dateRange: { from: "2024-01-01", to: "2024-12-31" },
+    });
+    expect(res.body).not.toHaveProperty("connection_config");
+    // scoped to the caller's org
+    expect(queryMock.mock.calls[0][1]).toEqual(["ds-1", "org-A"]);
+    expect(queryMock.mock.calls[0][0]).not.toMatch(/connection_config/);
+  });
+
+  it("404s for a source that isn't in the caller's organization", async () => {
+    const res = await request(buildApp()).get("/api/datasources/ds-of-org-B").set("Authorization", `Bearer ${tokenA}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/datasources/:id — rename", () => {
+  it("renames (trimmed), scoped to the caller's org", async () => {
+    queryMock.mockResolvedValueOnce({ rows: [{ id: "ds-1", name: "old.xlsx" }] }); // lookup
+    const res = await request(buildApp()).patch("/api/datasources/ds-1").set("Authorization", `Bearer ${tokenA}`).send({ name: "  Vendas 2025  " });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: "ds-1", name: "Vendas 2025" });
+    const update = queryMock.mock.calls.find(([sql]) => /UPDATE data_sources SET name/.test(sql));
+    expect(update[1]).toEqual(["Vendas 2025", "ds-1", "org-A"]);
+  });
+
+  it("rejects an empty or too-long name without touching the database", async () => {
+    const empty = await request(buildApp()).patch("/api/datasources/ds-1").set("Authorization", `Bearer ${tokenA}`).send({ name: "   " });
+    const long = await request(buildApp()).patch("/api/datasources/ds-1").set("Authorization", `Bearer ${tokenA}`).send({ name: "x".repeat(201) });
+    const wrongType = await request(buildApp()).patch("/api/datasources/ds-1").set("Authorization", `Bearer ${tokenA}`).send({ name: 42 });
+    expect([empty.status, long.status, wrongType.status]).toEqual([400, 400, 400]);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("404s for a source from another organization, and forbids viewers", async () => {
+    const notFound = await request(buildApp()).patch("/api/datasources/ds-of-org-B").set("Authorization", `Bearer ${tokenB}`).send({ name: "x" });
+    expect(notFound.status).toBe(404);
+    expect(queryMock.mock.calls[0][1]).toEqual(["ds-of-org-B", "org-B"]);
+
+    const viewer = signToken({ sub: "v", orgId: "org-A", role: "viewer", email: "v@a.com" });
+    const forbidden = await request(buildApp()).patch("/api/datasources/ds-1").set("Authorization", `Bearer ${viewer}`).send({ name: "x" });
+    expect(forbidden.status).toBe(403);
+  });
+});
+
+describe("GET /api/datasources/:id/export", () => {
+  it("returns an .xlsx with real numbers and the readable dimension names", async () => {
+    const XLSX = await import("xlsx");
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: "ds-1", name: "vendas.xlsx", row_count: 1 }] })
+      .mockResolvedValueOnce({ rows: [{
+        date: "2024-03-05", customer: "=HYPERLINK(\"x\")", product: "Café", region: "Norte", channel: "Loja",
+        quantity: "2", unit_price: "5.5", gross_revenue: "11", discount: "0", net_revenue: "11", cost: "6", gross_profit: "5", currency: "EUR",
+      }] });
+    const res = await request(buildApp()).get("/api/datasources/ds-1/export").set("Authorization", `Bearer ${tokenA}`).buffer(true).parse((r, cb) => {
+      const chunks = []; r.on("data", (c) => chunks.push(c)); r.on("end", () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/spreadsheetml/);
+    expect(decodeURIComponent(res.headers["content-disposition"])).toContain("vendas_export.xlsx");
+
+    const book = XLSX.read(res.body, { type: "buffer" });
+    const [row] = XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]]);
+    expect(row).toMatchObject({ Date: "2024-03-05", Product: "Café", Region: "Norte", Quantity: 2, "Net revenue": 11 });
+    expect(typeof row["Gross profit"]).toBe("number");
+    // a customer name that looks like a formula stays text, it is never evaluated
+    expect(book.Sheets[book.SheetNames[0]].B2.t).toBe("s");
+    expect(book.Sheets[book.SheetNames[0]].B2.f).toBeUndefined();
+  });
+
+  it("is manager-only and org-scoped", async () => {
+    const viewer = signToken({ sub: "v", orgId: "org-A", role: "viewer", email: "v@a.com" });
+    expect((await request(buildApp()).get("/api/datasources/ds-1/export").set("Authorization", `Bearer ${viewer}`)).status).toBe(403);
+    const other = await request(buildApp()).get("/api/datasources/ds-1/export").set("Authorization", `Bearer ${tokenB}`);
+    expect(other.status).toBe(404);
+    expect(queryMock.mock.calls[0][1]).toEqual(["ds-1", "org-B"]);
+  });
+});
