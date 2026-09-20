@@ -65,7 +65,12 @@ function Overview({ analytics, sourceInfo, execMode, filters }) {
         ? `Gera uma recomendação de negócio para os dados e filtros atuais. Filtros ativos: ${JSON.stringify(scope)}. Usa as ferramentas disponíveis para reunir evidência antes de responderes.`
         : `Generate a business recommendation for the current data and filters. Active filters: ${JSON.stringify(scope)}. Use the available tools to gather evidence before answering.`;
       const text = await callClaudeWithTools(ADVISOR_SYSTEM[lang], userText, { filters });
-      const result = JSON.parse(text.replace(/```json|```/g, "").trim());
+      // Open-weight models (Llama) often wrap the JSON in a sentence or a
+      // markdown fence; take everything from the first "{" to the last "}".
+      const raw = text.replace(/```json|```/g, "").trim();
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      const result = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : raw);
       setAdvice(result);
     } catch (e) {
       setErr(t("ai.summary.error"));
@@ -120,7 +125,7 @@ function Overview({ analytics, sourceInfo, execMode, filters }) {
         </div>
       </Card>
 
-      {!execMode && (
+      {execMode && (
         <div className="grid grid-cols-3 gap-4">
           <Card className="p-5 col-span-2">
             <div className="text-sm font-medium mb-3" style={{ color: C.charcoal }}>{t("chart.revVsProfit")}</div>
