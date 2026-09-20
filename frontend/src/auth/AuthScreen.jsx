@@ -73,16 +73,6 @@ function AuthScreen({ onAuthenticated }) {
             {mode === "login" ? t("auth.switchToRegister") : t("auth.switchToLogin")}
           </button>
         </form>
-        <div className="px-6 pb-6 -mt-1">
-          <button
-            type="button"
-            onClick={() => onAuthenticated({ name: "Demo" })}
-            className="w-full py-2.5 rounded-xl text-sm font-medium"
-            style={{ border: `1px solid ${C.greyBorder}`, color: C.charcoal }}
-          >
-            {t("auth.tryDemo")}
-          </button>
-        </div>
       </div>
     </div>
   );
