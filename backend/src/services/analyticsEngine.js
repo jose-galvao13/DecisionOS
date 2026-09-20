@@ -17,6 +17,7 @@ import { pool } from "../db/pool.js";
 import { ANALYTICS_ROW_CAP } from "../config/limits.js";
 import { getCached, setCached, invalidateByPrefix } from "./cache.js";
 import { buildRateIndex, rateAsOf } from "./fxRates.js";
+import { getActiveDataSourceId } from "./activeSource.js";
 
 /* ---- ported verbatim from DecisionOS.jsx --------------------------- */
 
@@ -325,6 +326,11 @@ function computeAnalytics(txs, locale = "pt-PT") {
    answer" holds whether the browser or Claude asks. ------------------- */
 
 async function loadOrgTransactions(orgId) {
+  // Only the org's *active* data source is analysed. Without this, every
+  // uploaded file's rows were summed together (each upload is its own data
+  // source), so uploading a second file doubled the numbers.
+  const activeId = await getActiveDataSourceId(orgId);
+  if (!activeId) return [];
   const [txResult, orgResult, rateResult] = await Promise.all([
     pool.query(
       `SELECT t.date, t.quantity, t.unit_price, t.discount, t.net_revenue, t.cost, t.gross_profit, t.currency,
@@ -334,10 +340,10 @@ async function loadOrgTransactions(orgId) {
        LEFT JOIN products  p ON p.id = t.product_id
        LEFT JOIN regions   r ON r.id = t.region_id
        LEFT JOIN channels ch ON ch.id = t.channel_id
-       WHERE t.org_id = $1
+       WHERE t.org_id = $1 AND t.data_source_id = $3
        ORDER BY t.date
        LIMIT $2`,
-      [orgId, ANALYTICS_ROW_CAP]
+      [orgId, ANALYTICS_ROW_CAP, activeId]
     ),
     pool.query(`SELECT default_currency FROM organizations WHERE id = $1`, [orgId]),
     pool.query(`SELECT currency, rate_to_default, effective_date FROM fx_rates WHERE org_id = $1`, [orgId]),

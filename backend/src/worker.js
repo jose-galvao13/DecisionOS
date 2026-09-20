@@ -22,6 +22,7 @@ import * as pgConnector from "./services/pgConnector.js";
 import { decryptJSON } from "./utils/crypto.js";
 import { writeAudit } from "./audit/auditLog.js";
 import { invalidateOrgAnalyticsCache } from "./services/analyticsEngine.js";
+import { setActiveDataSource } from "./services/activeSource.js";
 import { MAX_IMPORT_ROWS } from "./config/limits.js";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS || 1500);
@@ -64,6 +65,9 @@ async function runImport(job, { orgId, dataSourceId, rows, mapping }) {
 
   await updateJobProgress(job.id, { stage: "analytics", progress: 90 });
   await saveQualityReport(orgId, dataSourceId, quality);
+  // A freshly imported file/source becomes the one the app shows. A refresh
+  // of an existing source keeps whichever source the user has active.
+  if (job.type !== "refresh_postgres") await setActiveDataSource(orgId, dataSourceId);
   invalidateOrgAnalyticsCache(orgId); // next dashboard/advisor/decisions call recomputes from the new data
 
   return { ...result, dataQuality: { score: quality.score, issues: quality.issues } };

@@ -14,6 +14,8 @@ import { encryptJSON } from "../utils/crypto.js";
 import { writeAudit } from "../audit/auditLog.js";
 import { enqueueJob, getJob, listJobsForSource } from "../services/jobQueue.js";
 import { MAX_IMPORT_ROWS } from "../config/limits.js";
+import { getActiveDataSourceId, setActiveDataSource } from "../services/activeSource.js";
+import { invalidateOrgAnalyticsCache } from "../services/analyticsEngine.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -269,7 +271,57 @@ router.get("/", async (req, res) => {
     [req.user.orgId, limit, offset]
   );
   const { rows: countRows } = await pool.query(`SELECT COUNT(*) FROM data_sources WHERE org_id = $1`, [req.user.orgId]);
-  res.json({ dataSources: rows, total: Number(countRows[0].count), limit, offset });
+  // Which of them the dashboards are currently built from (see services/activeSource.js).
+  const activeId = await getActiveDataSourceId(req.user.orgId);
+  res.json({
+    dataSources: rows.map((r) => ({ ...r, is_active: r.id === activeId })),
+    total: Number(countRows[0].count),
+    limit,
+    offset,
+  });
+});
+
+// Switch which file/source the whole organization looks at. Only sources
+// that actually finished importing can be chosen.
+router.post("/:id/activate", requireMinRole("manager"), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, type, status, row_count FROM data_sources WHERE id = $1 AND org_id = $2`,
+    [req.params.id, req.user.orgId]
+  );
+  if (!rows.length) return res.status(404).json({ error: "data source not found" });
+  const source = rows[0];
+  if (source.status !== "connected" || !(Number(source.row_count) > 0)) {
+    return res.status(409).json({ error: "this data source has no imported data — finish or retry the import first" });
+  }
+  const before = await getActiveDataSourceId(req.user.orgId);
+  await setActiveDataSource(req.user.orgId, source.id);
+  invalidateOrgAnalyticsCache(req.user.orgId); // next dashboard/advisor call recomputes from this file
+  await writeAudit({
+    orgId: req.user.orgId, userId: req.user.id, action: "data_source.activated",
+    objectType: "data_source", objectId: source.id,
+    before: { activeDataSourceId: before }, after: { activeDataSourceId: source.id, name: source.name },
+  });
+  res.json({ dataSourceId: source.id, active: true });
+});
+
+// Remove a file/source and everything imported from it (transactions,
+// quality reports and job history go with it via ON DELETE CASCADE). If it
+// was the active one, the app falls back to the newest remaining source.
+router.delete("/:id", requireMinRole("manager"), async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, type, status, row_count FROM data_sources WHERE id = $1 AND org_id = $2`,
+    [req.params.id, req.user.orgId]
+  );
+  if (!rows.length) return res.status(404).json({ error: "data source not found" });
+  const source = rows[0];
+  await pool.query(`DELETE FROM data_sources WHERE id = $1 AND org_id = $2`, [source.id, req.user.orgId]);
+  invalidateOrgAnalyticsCache(req.user.orgId);
+  await writeAudit({
+    orgId: req.user.orgId, userId: req.user.id, action: "data_source.deleted",
+    objectType: "data_source", objectId: source.id,
+    before: { name: source.name, type: source.type, rowCount: Number(source.row_count) },
+  });
+  res.json({ deleted: true, activeDataSourceId: await getActiveDataSourceId(req.user.orgId) });
 });
 
 // FASE 8 progress polling — the frontend calls this every ~1.5s while a

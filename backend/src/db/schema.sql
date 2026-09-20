@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS data_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_data_sources_org ON data_sources(org_id);
 
+-- An org can keep several uploaded files / connected sources; exactly one is
+-- "active" and feeds the dashboards, the advisor and the decision engine.
+-- NULL means "fall back to the newest healthy source" (services/activeSource.js).
+-- Added with ALTER (not inline) because organizations is created before
+-- data_sources, and so existing databases pick it up on the next startup.
+ALTER TABLE organizations
+  ADD COLUMN IF NOT EXISTS active_data_source_id TEXT REFERENCES data_sources(id) ON DELETE SET NULL;
+
 -- Dimensions -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (
   id           TEXT PRIMARY KEY,
