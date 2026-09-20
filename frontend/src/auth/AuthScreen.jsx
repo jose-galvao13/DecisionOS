@@ -4,6 +4,7 @@ import { C, fontImport } from "../lib/theme";
 import { useLang } from "../lib/i18n";
 import { apiFetch, setToken } from "../api/client";
 import ThemeSwitch from "../components/ThemeSwitch";
+import LangSwitch from "../components/LangSwitch";
 
 /* ---------------------------------------------------------------
    AUTH — every /api/* route on the backend requires a Bearer JWT
@@ -40,9 +41,9 @@ function AuthScreen({ onAuthenticated }) {
   };
 
   return (
-    <div className="w-full min-h-screen flex items-center justify-center p-6 relative" style={{ background: C.greyBg }}>
+    <div className="w-full min-h-screen flex items-center justify-center px-6 pb-6 pt-16 relative" style={{ background: C.greyBg }}>
       <style>{fontImport}</style>
-      <div className="absolute top-6 right-6"><ThemeSwitch /></div>
+      <div className="absolute top-6 right-6 flex items-center gap-2"><ThemeSwitch /><LangSwitch /></div>
       <div className="w-full max-w-sm rounded-3xl overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.greyBorder}` }}>
         <div className="px-8 pt-8 pb-6" style={{ background: C.navyDeep }}>
           <div className="flex items-center gap-2 mb-2">
