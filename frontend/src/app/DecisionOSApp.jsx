@@ -189,7 +189,7 @@ function DecisionOSApp({ user, onLogout }) {
       return <EmptyState icon={AlertTriangle} desc={t("filter.emptyPeriod")} />;
     }
     switch (view) {
-      case "overview": return <Overview analytics={analytics} sourceInfo={sourceInfo} execMode={execMode} filters={filters} />;
+      case "overview": return <Overview analytics={analytics} sourceInfo={sourceInfo} execMode={execMode} filters={filters} user={user} />;
       case "bi": return <BusinessIntelligence analytics={analytics} sourceInfo={sourceInfo} />;
       case "profit": return <ProfitIntelligence analytics={analytics} sourceInfo={sourceInfo} />;
       case "customers": return <CustomerIntelligenceView analytics={analytics} sourceInfo={sourceInfo} />;
