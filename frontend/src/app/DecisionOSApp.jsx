@@ -64,7 +64,8 @@ function DecisionOSApp({ user, onLogout }) {
   const toast = useToast();
   const [view, setView] = useState("overview");
   const [showOnboarding, setShowOnboarding] = useState(true);
-  const [execMode, setExecMode] = useState(false);
+  // Executive mode ON = charts visible (the default view); OFF = KPIs and AI summary only.
+  const [execMode, setExecMode] = useState(true);
   const [demoTransactions] = useState(() => generateDemoTransactions());
   const [sourceInfo, setSourceInfo] = useState({ type: "demo", name: "", rows: 0 });
   const [quality, setQuality] = useState(null);
