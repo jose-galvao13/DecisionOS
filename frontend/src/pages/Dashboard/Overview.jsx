@@ -15,7 +15,15 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 
-function Overview({ analytics, sourceInfo, execMode, filters }) {
+// Time-of-day key for the greeting, from the viewer's local clock.
+function greetingKey(now = new Date()) {
+  const h = now.getHours();
+  if (h >= 5 && h < 12) return "overview.greeting.morning";
+  if (h >= 12 && h < 19) return "overview.greeting.afternoon";
+  return "overview.greeting.evening";
+}
+
+function Overview({ analytics, sourceInfo, execMode, filters, user }) {
   const { t, lang, locale } = useLang();
   const { totals, deltas, leakage, monthly, byProduct } = analytics;
   const [advice, setAdvice] = useState(null);
@@ -79,12 +87,14 @@ function Overview({ analytics, sourceInfo, execMode, filters }) {
 
   const pieColors = [C.blue, "#5C93F0", "#8FB4F5", "#BFD4F9", C.greyBorder];
   const dimLabel = (d) => (d === "Produto" ? t("dim.product") : d === "Região" ? t("dim.region") : d === "Canal" ? t("dim.channel") : d);
+  const firstName = (user?.name || "").trim().split(/\s+/)[0];
+  const greeting = firstName ? `${t(greetingKey())}, ${firstName}` : t(greetingKey());
   const alerts = useMemo(() => computeAlerts(analytics), [analytics]);
   const copyFor = (a) => alertCopy(a, t, locale);
 
   return (
     <div>
-      <SectionTitle eyebrow={t("overview.greeting")} title="Executive Overview" desc={t("overview.desc")} />
+      <SectionTitle eyebrow={greeting} title="Executive Overview" desc={t("overview.desc")} />
       <SourceBadge sourceInfo={sourceInfo} />
 
       {(decisions.length > 0 || alerts.length > 0) && (
