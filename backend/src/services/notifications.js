@@ -22,7 +22,7 @@ import { pool } from "../db/pool.js";
 import { ROLE_RANK } from "../auth/middleware.js";
 import { computeAnalyticsForOrg } from "./analyticsEngine.js";
 import { generateDecisions } from "./decisionEngine.js";
-import { getActiveDataSourceId } from "./activeSource.js";
+import { getActiveDataSourceIds } from "./activeSource.js";
 
 const RECENT_DECISION_DAYS = 14;
 const RECENT_IMPORT_FAILURE_DAYS = 7;
@@ -89,20 +89,26 @@ async function importsFailed(orgId) {
   }));
 }
 
+// With several files active at once, a single bad one shouldn't hide behind
+// a good one's score — this looks at every active source's latest report
+// and surfaces the worst, so one poor-quality file always gets flagged.
 async function poorDataQuality(orgId) {
-  const activeId = await getActiveDataSourceId(orgId);
-  if (!activeId) return [];
+  const activeIds = await getActiveDataSourceIds(orgId);
+  if (!activeIds.length) return [];
   const { rows } = await pool.query(
-    `SELECT r.id, r.score, r.created_at, ds.name
+    `SELECT DISTINCT ON (r.data_source_id) r.id, r.data_source_id, r.score, r.created_at, ds.name
      FROM data_quality_reports r JOIN data_sources ds ON ds.id = r.data_source_id
-     WHERE r.org_id = $1 AND r.data_source_id = $2 ORDER BY r.created_at DESC LIMIT 1`,
-    [orgId, activeId]
+     WHERE r.org_id = $1 AND r.data_source_id = ANY($2)
+     ORDER BY r.data_source_id, r.created_at DESC`,
+    [orgId, activeIds]
   );
-  const r = rows[0];
-  if (!r || !(Number(r.score) < QUALITY_ALERT_BELOW)) return [];
+  const worst = rows
+    .filter((r) => Number(r.score) < QUALITY_ALERT_BELOW)
+    .sort((a, b) => Number(a.score) - Number(b.score))[0];
+  if (!worst) return [];
   return [{
-    key: `low_quality:${r.id}`, kind: "low_quality", severity: "red",
-    params: { name: r.name, score: Math.round(Number(r.score)) }, createdAt: iso(r.created_at), target: { view: "dataQuality" },
+    key: `low_quality:${worst.id}`, kind: "low_quality", severity: "red",
+    params: { name: worst.name, score: Math.round(Number(worst.score)) }, createdAt: iso(worst.created_at), target: { view: "dataQuality" },
   }];
 }
 

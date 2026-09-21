@@ -83,7 +83,7 @@ function DecisionOSApp({ user, onLogout }) {
   // Executive mode ON = charts visible (the default view); OFF = KPIs and AI summary only.
   const [execMode, setExecMode] = useState(true);
   const [demoTransactions] = useState(() => generateDemoTransactions());
-  const [sourceInfo, setSourceInfo] = useState({ type: "demo", name: "", rows: 0 });
+  const [baseSourceInfo, setSourceInfo] = useState({ type: "demo", name: "", rows: 0 });
   const [quality, setQuality] = useState(null);
   const [filters, setFilters] = useState({ period: "all", product: "all", region: "all", channel: "all" });
   const [backendAnalytics, setBackendAnalytics] = useState(null);
@@ -100,6 +100,40 @@ function DecisionOSApp({ user, onLogout }) {
 
   const DEFAULT_FILTERS = { period: "all", product: "all", region: "all", channel: "all" };
   const sourceInfoFrom = (d) => ({ type: d.type, name: d.name, rows: d.row_count || 0, dataSourceId: d.id, lastUpdated: d.last_sync_at });
+
+  // Several files can be included in the analysis at once. `activeIds` is the set
+  // the backend is analysing right now; `activeKey` changes exactly when that set
+  // does, so it is what triggers a refetch and remounts the pages.
+  const activeSources = useMemo(() => dataSources.filter((d) => d.is_active), [dataSources]);
+  const activeIds = useMemo(() => activeSources.map((d) => d.id), [activeSources]);
+  const activeKey = useMemo(() => activeIds.slice().sort().join(","), [activeIds]);
+
+  // The Data Quality Center shows one report: with several files included, the
+  // one with the lowest score (a bad file must not hide behind a good one).
+  const qualityFile = useMemo(() => {
+    const scored = activeSources.filter((d) => d.quality_score != null && Number.isFinite(Number(d.quality_score)));
+    if (scored.length) return scored.reduce((worst, d) => (Number(d.quality_score) < Number(worst.quality_score) ? d : worst));
+    return activeSources[0] ?? null;
+  }, [activeSources]);
+
+  // What the pages call "the source": the file itself when one is included, a
+  // combined description ("3 files", summed rows) when several are. Until the
+  // list has loaded (e.g. right after an import) it is whatever was set directly.
+  const sourceInfo = useMemo(() => {
+    if (baseSourceInfo.type === "demo" || !activeSources.length) return baseSourceInfo;
+    if (activeSources.length === 1) return { ...sourceInfoFrom(activeSources[0]), dataSourceIds: activeIds, fileCount: 1 };
+    const newest = activeSources.reduce((a, b) => (new Date(b.last_sync_at || 0) > new Date(a.last_sync_at || 0) ? b : a));
+    return {
+      type: activeSources[0].type,
+      name: t("header.nFiles", { n: activeSources.length }),
+      rows: activeSources.reduce((sum, d) => sum + (Number(d.row_count) || 0), 0),
+      dataSourceId: activeSources[0].id,
+      dataSourceIds: activeIds,
+      fileCount: activeSources.length,
+      lastUpdated: newest.last_sync_at,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseSourceInfo, activeSources, activeIds, t]);
 
   // Refreshes the list of uploaded files/sources. Returns null if it couldn't be loaded.
   const loadSources = async () => {
@@ -138,12 +172,11 @@ function DecisionOSApp({ user, onLogout }) {
         // empty dashboard and no obvious way to upload again.
         const list = data.dataSources || [];
         if (!cancelled) setDataSources(list);
-        // The backend says which one is active (is_active); the fallback covers a backend that predates it.
+        // The backend says which ones are included (is_active); the fallback covers a backend that predates it.
         const latest = list.find((d) => d.is_active) || list.find((d) => d.status === "connected" && Number(d.row_count) > 0);
         if (!cancelled && latest) {
           setSourceInfo(sourceInfoFrom(latest));
           setShowOnboarding(false);
-          loadQuality(latest.id);
         }
       } catch {
         // no data sources yet (or listing failed) — demo mode stays as-is
@@ -154,7 +187,16 @@ function DecisionOSApp({ user, onLogout }) {
     return () => { cancelled = true; };
   }, []);
 
-  const isBackendMode = sourceInfo.type !== "demo";
+  const isBackendMode = baseSourceInfo.type !== "demo";
+
+  // Load the quality report of the file the Data Quality Center is showing,
+  // and again whenever which file that is changes (switch, remove, new import).
+  useEffect(() => {
+    if (!isBackendMode) return;
+    if (qualityFile) loadQuality(qualityFile.id);
+    else setQuality(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBackendMode, qualityFile?.id]);
 
   // Backend-driven analytics: refetch whenever the active filters change.
   useEffect(() => {
@@ -170,7 +212,7 @@ function DecisionOSApp({ user, onLogout }) {
       .catch((e) => { if (!cancelled) { setAnalyticsError(e.message); setBackendAnalytics(null); } })
       .finally(() => { if (!cancelled) setAnalyticsLoading(false); });
     return () => { cancelled = true; };
-  }, [isBackendMode, filters, locale, sourceInfo.dataSourceId]);
+  }, [isBackendMode, filters, locale, activeKey]);
 
   // Demo-mode analytics: computed locally, exactly as before.
   const demoAnalytics = useMemo(
@@ -186,44 +228,52 @@ function DecisionOSApp({ user, onLogout }) {
     loadSources();
   };
 
-  // Switch which file the whole app looks at. The backend re-points every
-  // analytics query to it; here we reset the per-file view state.
-  const activateSource = async (src) => {
+  // Include a file in the analysis, or take it out. Several can be included at
+  // once; the backend re-points every analytics query to the new set. If the
+  // file repeats rows that an included file already has, the backend refuses
+  // and lists them — then the person decides whether to include it anyway.
+  const toggleSource = async (src, { ignoreDuplicates = false } = {}) => {
     setBusySourceId(src.id);
     try {
-      await apiFetch(`/api/datasources/${src.id}/activate`, { method: "POST" });
-      setSourceInfo(sourceInfoFrom(src));
+      const res = await apiFetch(`/api/datasources/${src.id}/activate${ignoreDuplicates ? "?ignoreDuplicates=true" : ""}`, { method: "POST" });
       setFilters(DEFAULT_FILTERS);
-      setBackendAnalytics(null); setAnalyticsLoading(true); // show the loader, not the previous file's numbers
-      await Promise.all([loadQuality(src.id), loadSources()]);
-      toast.success(t("data.activated", { name: src.name }));
+      setBackendAnalytics(null); setAnalyticsLoading(true); // show the loader, not the previous set's numbers
+      await loadSources();
+      toast.success(t(res.active ? "data.includedNow" : "data.excludedNow", { name: src.name }));
     } catch (e) {
+      if (e.code === "possible_duplicates" && !ignoreDuplicates) {
+        const overlaps = e.data?.overlaps || [];
+        const others = overlaps.map((o) => `"${o.name}"`).join(", ");
+        const n = overlaps.reduce((sum, o) => sum + (Number(o.duplicateRowCount) || 0), 0);
+        if (window.confirm(t("data.duplicateConfirm", { name: src.name, n: n.toLocaleString(locale), others }))) {
+          return toggleSource(src, { ignoreDuplicates: true });
+        }
+        return;
+      }
       toast.error(e.message || t("onboarding.error.readFile"));
     } finally {
       setBusySourceId(null);
     }
   };
 
-  // Remove a file and its imported data. If it was the one in use, move to
-  // whichever the backend falls back to; with none left, back to the upload screen.
+  // Remove a file and its imported data. If it was one of the included files the
+  // set changes (the backend falls back to the newest remaining file when none
+  // is left included); with nothing left at all, back to the upload screen.
   const removeSource = async (src) => {
     if (!window.confirm(t("data.removeConfirm", { name: src.name }))) return;
     setBusySourceId(src.id);
     try {
+      const wasIncluded = activeIds.includes(src.id);
       const res = await apiFetch(`/api/datasources/${src.id}`, { method: "DELETE" });
-      const list = await loadSources();
-      if (src.id === sourceInfo.dataSourceId) {
-        const next = res.activeDataSourceId && list?.find((d) => d.id === res.activeDataSourceId);
-        if (next) {
-          setSourceInfo(sourceInfoFrom(next));
-          setFilters(DEFAULT_FILTERS);
-          setBackendAnalytics(null); setAnalyticsLoading(true);
-          loadQuality(next.id);
-        } else {
-          setSourceInfo({ type: "demo", name: "", rows: demoTransactions.length });
-          setQuality(null); setBackendAnalytics(null);
-          setShowOnboarding(true);
-        }
+      await loadSources();
+      const remaining = res.activeDataSourceIds ?? (res.activeDataSourceId ? [res.activeDataSourceId] : []);
+      if (!remaining.length) {
+        setSourceInfo({ type: "demo", name: "", rows: demoTransactions.length });
+        setQuality(null); setBackendAnalytics(null);
+        setShowOnboarding(true);
+      } else if (wasIncluded) {
+        setFilters(DEFAULT_FILTERS);
+        setBackendAnalytics(null); setAnalyticsLoading(true);
       }
       toast.success(t("data.removed", { name: src.name }));
     } catch (e) {
@@ -287,11 +337,17 @@ function DecisionOSApp({ user, onLogout }) {
         body: { stagingId: preview.stagingId, mapping: preview.suggestedMapping, name: file.name },
       });
       const finished = await pollJob(queued.jobId, { onProgress: setReplaceJob });
-      setSourceInfo({ type: "excel", name: file.name, rows: finished.result.imported, dataSourceId: queued.dataSourceId, lastUpdated: new Date() });
-      setQuality(normalizeQuality(finished.result.dataQuality));
+      // First data ever (still on demo data): switch to real data. Otherwise the
+      // list below decides what is included — a file can be imported but left out.
+      setSourceInfo((s) => (s.type === "demo" ? { type: "excel", name: file.name, rows: finished.result.imported, dataSourceId: queued.dataSourceId, lastUpdated: new Date() } : s));
       setFilters(DEFAULT_FILTERS);
-      loadSources();
-      toast.success(t("data.replaceSuccess", { n: finished.result.imported }) || `Imported ${finished.result.imported} rows.`);
+      await loadSources();
+      if (finished.result.included === false) {
+        const others = (finished.result.duplicateOverlaps || []).map((o) => `"${o.name}"`).join(", ");
+        toast.info(t("data.notIncludedDuplicate", { name: file.name, others }), { duration: 10000 });
+      } else {
+        toast.success(t("data.replaceSuccess", { n: finished.result.imported }) || `Imported ${finished.result.imported} rows.`);
+      }
     } catch (e) {
       const message = e.message || t("onboarding.error.readFile");
       setAnalyticsError(message);
@@ -342,8 +398,15 @@ function DecisionOSApp({ user, onLogout }) {
       case "sim": return <DecisionSimulator filters={filters} sourceInfo={sourceInfo} />;
       case "advisor": return <AIAdvisor analytics={analytics} sourceInfo={sourceInfo} filters={filters} />;
       case "decisionLog": return <DecisionLogPage user={user} />;
-      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onAdd={() => replaceInput.current?.click()} replaceJob={replaceJob} sources={dataSources} activeId={sourceInfo.dataSourceId} onActivate={activateSource} onRemove={removeSource} onRename={renameSource} onExport={exportSource} busyId={busySourceId} exportingId={exportingSourceId} canManage={canManageData(user?.role)} />;
-      case "dataQuality": return <DataQualityCenter quality={quality} sourceInfo={sourceInfo} analytics={analytics} />;
+      case "data": return <DataPage analytics={analytics} sourceInfo={sourceInfo} quality={quality} onAdd={() => replaceInput.current?.click()} replaceJob={replaceJob} sources={dataSources} activeIds={activeIds} onToggle={toggleSource} onRemove={removeSource} onRename={renameSource} onExport={exportSource} busyId={busySourceId} exportingId={exportingSourceId} canManage={canManageData(user?.role)} />;
+      case "dataQuality": return (
+        <DataQualityCenter
+          quality={quality}
+          sourceInfo={qualityFile ? sourceInfoFrom(qualityFile) : sourceInfo}
+          analytics={analytics}
+          note={activeSources.length > 1 && qualityFile ? t("dq.scopeNote", { n: activeSources.length, name: qualityFile.name }) : null}
+        />
+      );
       case "products": return <ProductsPage analytics={analytics} sourceInfo={sourceInfo} />;
       case "reports": return <ReportsPage analytics={analytics} sourceInfo={sourceInfo} />;
       case "settings": return <SettingsPage sourceInfo={sourceInfo} />;
@@ -405,7 +468,7 @@ function DecisionOSApp({ user, onLogout }) {
               </div>
             }
           >
-            <React.Fragment key={sourceInfo.dataSourceId || "demo"}>{renderView()}</React.Fragment>
+            <React.Fragment key={activeKey || "demo"}>{renderView()}</React.Fragment>
           </Suspense>
         </main>
       </div>

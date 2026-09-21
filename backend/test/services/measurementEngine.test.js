@@ -4,7 +4,8 @@ const queryMock = vi.fn();
 vi.mock("../../src/db/pool.js", () => ({ pool: { query: (...args) => queryMock(...args) } }));
 vi.mock("../../src/services/activeSource.js", () => ({
   getActiveDataSourceId: vi.fn(async () => "ds-active"),
-  setActiveDataSource: vi.fn(async () => {}),
+  getActiveDataSourceIds: vi.fn(async () => ["ds-active"]),
+  setDataSourceActive: vi.fn(async () => {}),
 }));
 vi.mock("../../src/audit/auditLog.js", () => ({ writeAudit: vi.fn(async () => {}) }));
 

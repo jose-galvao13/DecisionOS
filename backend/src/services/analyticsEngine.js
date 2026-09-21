@@ -17,7 +17,7 @@ import { pool } from "../db/pool.js";
 import { ANALYTICS_ROW_CAP } from "../config/limits.js";
 import { getCached, setCached, invalidateByPrefix } from "./cache.js";
 import { buildRateIndex, rateAsOf } from "./fxRates.js";
-import { getActiveDataSourceId } from "./activeSource.js";
+import { getActiveDataSourceIds } from "./activeSource.js";
 
 /* ---- ported verbatim from DecisionOS.jsx --------------------------- */
 
@@ -326,11 +326,16 @@ function computeAnalytics(txs, locale = "pt-PT") {
    answer" holds whether the browser or Claude asks. ------------------- */
 
 async function loadOrgTransactions(orgId) {
-  // Only the org's *active* data source is analysed. Without this, every
-  // uploaded file's rows were summed together (each upload is its own data
-  // source), so uploading a second file doubled the numbers.
-  const activeId = await getActiveDataSourceId(orgId);
-  if (!activeId) return [];
+  // Only the org's *active* data source(s) are analysed. Without this,
+  // every uploaded file's rows would be summed together unconditionally
+  // (each upload is its own data source), so uploading a second file
+  // would silently double the numbers unless the user opted into that by
+  // marking more than one file active.
+  const activeIds = await getActiveDataSourceIds(orgId);
+  if (!activeIds.length) return [];
+  // ANALYTICS_ROW_CAP is one shared budget across every active file, not
+  // per file — two 150k-row files both active would otherwise blow well
+  // past the limit the import path enforces per file.
   const [txResult, orgResult, rateResult] = await Promise.all([
     pool.query(
       `SELECT t.date, t.quantity, t.unit_price, t.discount, t.net_revenue, t.cost, t.gross_profit, t.currency,
@@ -340,10 +345,10 @@ async function loadOrgTransactions(orgId) {
        LEFT JOIN products  p ON p.id = t.product_id
        LEFT JOIN regions   r ON r.id = t.region_id
        LEFT JOIN channels ch ON ch.id = t.channel_id
-       WHERE t.org_id = $1 AND t.data_source_id = $3
+       WHERE t.org_id = $1 AND t.data_source_id = ANY($3)
        ORDER BY t.date
        LIMIT $2`,
-      [orgId, ANALYTICS_ROW_CAP, activeId]
+      [orgId, ANALYTICS_ROW_CAP, activeIds]
     ),
     pool.query(`SELECT default_currency FROM organizations WHERE id = $1`, [orgId]),
     pool.query(`SELECT currency, rate_to_default, effective_date FROM fx_rates WHERE org_id = $1`, [orgId]),
@@ -435,7 +440,12 @@ export async function computeAnalyticsForOrg(orgId, filters = {}, locale = "pt-P
   // worker.js whenever a data source finishes importing (see
   // invalidateOrgAnalyticsCache below), so it can never serve stale data
   // past the next successful sync.
-  const cacheKey = `analytics:${orgId}:${locale}:${JSON.stringify(filters || {})}`;
+  // The cache key must include *which* files are active, not just the org:
+  // switching a file on/off changes the numbers without touching orgId,
+  // locale or filters, and a key that ignored that would serve stale
+  // numbers from before the switch until the 60s TTL happened to expire.
+  const activeIds = await getActiveDataSourceIds(orgId);
+  const cacheKey = `analytics:${orgId}:${locale}:${activeIds.slice().sort().join(",")}:${JSON.stringify(filters || {})}`;
   const cached = getCached(cacheKey);
   if (cached !== undefined) return cached;
 

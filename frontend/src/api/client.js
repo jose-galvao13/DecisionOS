@@ -36,7 +36,15 @@ async function handleApiResponse(res) {
     setToken(null);
     window.dispatchEvent(new Event("decisionos:unauthorized"));
   }
-  if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(data.error || `request failed (${res.status})`);
+    // Callers that need more than the message (e.g. the duplicate-file warning)
+    // read these; everything else keeps using err.message as before.
+    err.status = res.status;
+    err.code = data.code;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 async function apiFetch(path, { method = "GET", body } = {}) {

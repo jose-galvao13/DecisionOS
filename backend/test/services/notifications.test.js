@@ -10,7 +10,7 @@ vi.mock("../../src/services/analyticsEngine.js", () => ({ computeAnalyticsForOrg
 const findingsMock = vi.fn();
 vi.mock("../../src/services/decisionEngine.js", () => ({ generateDecisions: (...a) => findingsMock(...a) }));
 const activeMock = vi.fn();
-vi.mock("../../src/services/activeSource.js", () => ({ getActiveDataSourceId: (...a) => activeMock(...a) }));
+vi.mock("../../src/services/activeSource.js", () => ({ getActiveDataSourceIds: (...a) => activeMock(...a) }));
 
 import { buildNotifications, markRead } from "../../src/services/notifications.js";
 import notificationsRouter from "../../src/routes/notifications.routes.js";
@@ -23,7 +23,7 @@ beforeEach(() => {
   findingsMock.mockReset();
   activeMock.mockReset();
   db = { approvals: [], resolved: [], outcomes: [], failedImports: [], quality: [], readKeys: [], throwOn: null };
-  activeMock.mockResolvedValue("ds-1");
+  activeMock.mockResolvedValue(["ds-1"]);
   analyticsMock.mockResolvedValue({ count: 480, dateRange: { max: new Date("2026-08-31T00:00:00Z") } });
   findingsMock.mockReturnValue([]);
   queryMock.mockImplementation(async (sql) => {
@@ -94,7 +94,7 @@ describe("buildNotifications — data quality and Decision Engine findings", () 
   });
 
   it("skips data quality when there is no active file", async () => {
-    activeMock.mockResolvedValue(null);
+    activeMock.mockResolvedValue([]);
     expect(usedQuery(/FROM data_quality_reports/)).toBe(false);
     await buildNotifications(asViewer);
     expect(usedQuery(/FROM data_quality_reports/)).toBe(false);

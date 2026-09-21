@@ -22,7 +22,8 @@ import * as pgConnector from "./services/pgConnector.js";
 import { decryptJSON } from "./utils/crypto.js";
 import { writeAudit } from "./audit/auditLog.js";
 import { invalidateOrgAnalyticsCache } from "./services/analyticsEngine.js";
-import { setActiveDataSource } from "./services/activeSource.js";
+import { getActiveDataSourceIds, setDataSourceActive } from "./services/activeSource.js";
+import { checkActivationOverlap } from "./services/duplicateDetection.js";
 import { MAX_IMPORT_ROWS } from "./config/limits.js";
 
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS || 1500);
@@ -48,6 +49,14 @@ async function runImport(job, { orgId, dataSourceId, rows, mapping }) {
     );
   }
 
+  // Which files are already in the analysis *before* this import lands. Taken
+  // now, while the new source is still 'syncing' with no rows, so it can't
+  // show up in the set (or as the "newest source" fallback) and hide the files
+  // it has to be checked against. A refresh re-imports an existing source and
+  // leaves its included/excluded state alone.
+  const isNewSource = job.type !== "refresh_postgres";
+  const activeBefore = isNewSource ? await getActiveDataSourceIds(orgId) : [];
+
   await updateJobProgress(job.id, { stage: "validating", progress: 10 });
   const quality = assessQuality(rows, mapping);
 
@@ -65,12 +74,31 @@ async function runImport(job, { orgId, dataSourceId, rows, mapping }) {
 
   await updateJobProgress(job.id, { stage: "analytics", progress: 90 });
   await saveQualityReport(orgId, dataSourceId, quality);
-  // A freshly imported file/source becomes the one the app shows. A refresh
-  // of an existing source keeps whichever source the user has active.
-  if (job.type !== "refresh_postgres") await setActiveDataSource(orgId, dataSourceId);
+
+  // A freshly imported file/source is *added* to the set the app already
+  // shows, alongside whatever else was active — it no longer replaces it —
+  // unless it repeats rows an included file already has (e.g. the same Excel
+  // uploaded twice): including it would silently double-count that revenue,
+  // so it is kept but left out, and the result says why. The person can still
+  // include it on purpose from the Data page (which asks them to confirm).
+  let included = true;
+  let duplicateOverlaps = [];
+  if (isNewSource) {
+    const { overlaps } = await checkActivationOverlap(orgId, dataSourceId, activeBefore);
+    duplicateOverlaps = overlaps.filter((o) => o.duplicateRowCount > 0);
+    included = duplicateOverlaps.length === 0;
+    // Make the files that were in the analysis explicit in every case: with no
+    // file flagged the app falls back to "the newest source", which is now this one.
+    for (const id of activeBefore) await setDataSourceActive(orgId, id, true);
+    if (included) await setDataSourceActive(orgId, dataSourceId, true);
+  }
   invalidateOrgAnalyticsCache(orgId); // next dashboard/advisor/decisions call recomputes from the new data
 
-  return { ...result, dataQuality: { score: quality.score, issues: quality.issues, stats: quality.stats } };
+  return {
+    ...result,
+    ...(isNewSource ? { included, duplicateOverlaps } : {}),
+    dataQuality: { score: quality.score, issues: quality.issues, stats: quality.stats },
+  };
 }
 
 async function processImportExcel(job) {

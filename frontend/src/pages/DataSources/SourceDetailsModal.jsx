@@ -9,7 +9,7 @@ import { Modal } from "../../components/ui";
 /* ---------------------------------------------------------------
    "Details" of one file/source: where its data comes from, which
    period it covers, how its columns were mapped, and *its own* quality
-   report. The Data Quality Center only ever shows the active file, so
+   report. The Data Quality Center shows just one file (the lowest-quality included one), so
    this is the way to inspect a file without switching to it.
 ----------------------------------------------------------------*/
 
@@ -89,7 +89,7 @@ function SourceDetailsModal({ source, active, onClose }) {
             <>
               <div className="grid grid-cols-3 gap-3">
                 <Fact label={t("data.detail.status")}>
-                  {active ? t("data.active") : details.status === "connected" ? t("data.detail.statusReady") : t(`data.status.${details.status}`)}
+                  {active ? t("data.included") : details.status === "connected" ? t("data.detail.statusReady") : t(`data.status.${details.status}`)}
                 </Fact>
                 <Fact label={t("dq.rows")}>{details.rowCount.toLocaleString(locale)}</Fact>
                 <Fact label={t("data.detail.period")}>{from && to ? `${from} – ${to}` : "—"}</Fact>

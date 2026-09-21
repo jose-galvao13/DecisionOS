@@ -100,13 +100,30 @@ CREATE TABLE IF NOT EXISTS data_sources (
 );
 CREATE INDEX IF NOT EXISTS idx_data_sources_org ON data_sources(org_id);
 
--- An org can keep several uploaded files / connected sources; exactly one is
--- "active" and feeds the dashboards, the advisor and the decision engine.
+-- An org can keep several uploaded files / connected sources; any number of
+-- them can be "active" at once and feed the dashboards, the advisor and the
+-- decision engine together (services/activeSource.js). Added with ALTER (not
+-- inline) so a database created before this column existed picks it up on
+-- the next startup instead of failing to boot.
+ALTER TABLE data_sources
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_data_sources_org_active ON data_sources(org_id) WHERE is_active;
+
+-- Old, single-source column, kept (not dropped) so a database that still has
+-- it doesn't break on startup; organizations.active_data_source_id is no
+-- longer written to by the app — is_active above is now the source of truth.
 -- NULL means "fall back to the newest healthy source" (services/activeSource.js).
--- Added with ALTER (not inline) because organizations is created before
--- data_sources, and so existing databases pick it up on the next startup.
 ALTER TABLE organizations
   ADD COLUMN IF NOT EXISTS active_data_source_id TEXT REFERENCES data_sources(id) ON DELETE SET NULL;
+
+-- Backfill: an org that already had a single active_data_source_id set
+-- (from before is_active existed) keeps seeing exactly that file as active,
+-- rather than suddenly seeing none, the first time it boots on this schema.
+UPDATE data_sources d
+   SET is_active = true
+  FROM organizations o
+ WHERE o.active_data_source_id = d.id
+   AND NOT EXISTS (SELECT 1 FROM data_sources d2 WHERE d2.org_id = d.org_id AND d2.is_active);
 
 -- Dimensions -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (

@@ -65,7 +65,7 @@ describe("GET /api/datasources — auth required", () => {
     const res = await request(app).get("/api/datasources?limit=9999&offset=-1").set("Authorization", `Bearer ${tokenA}`);
     expect(res.status).toBe(200);
     const [sql, params] = queryMock.mock.calls[0];
-    expect(sql).toMatch(/WHERE org_id = \$1/);
+    expect(sql).toMatch(/WHERE d\.org_id = \$1/); // the alias: the list joins each file's latest quality report
     expect(params[0]).toBe("org-A");
     expect(params[1]).toBeLessThanOrEqual(100); // clamped limit
   });

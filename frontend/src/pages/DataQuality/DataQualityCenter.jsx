@@ -94,7 +94,9 @@ function SyncHistory({ dataSourceId }) {
   );
 }
 
-export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
+// `note` (optional): one line under the title, used when several files are
+// included and the report shown is only one of them.
+export default function DataQualityCenter({ quality, sourceInfo, analytics, note }) {
   const { t, locale } = useLang();
   const q = normalizeQuality(quality);
 
@@ -124,6 +126,7 @@ export default function DataQualityCenter({ quality, sourceInfo, analytics }) {
   return (
     <div>
       <SectionTitle eyebrow={t("nav.dataQuality") || "Data Quality"} title={t("dq.title")} desc="" />
+      {note && <p data-testid="dq-scope-note" className="text-sm mt-1" style={{ color: C.textSecondary }}>{note}</p>}
 
       <div className="grid grid-cols-3 gap-4 mt-4">
         {/* Score card */}

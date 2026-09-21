@@ -3,12 +3,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const queryMock = vi.fn();
 vi.mock("../../src/db/pool.js", () => ({ pool: { query: (...args) => queryMock(...args) } }));
 vi.mock("../../src/services/activeSource.js", () => ({
-  getActiveDataSourceId: vi.fn(async () => "ds-active"),
-  setActiveDataSource: vi.fn(async () => {}),
+  getActiveDataSourceIds: vi.fn(async () => ["ds-active"]),
+  setDataSourceActive: vi.fn(async () => {}),
 }));
 
 import { loadOrgTransactions } from "../../src/services/analyticsEngine.js";
-import { getActiveDataSourceId } from "../../src/services/activeSource.js";
+import { getActiveDataSourceIds } from "../../src/services/activeSource.js";
 
 function txRow(overrides = {}) {
   return {
@@ -70,20 +70,32 @@ describe("loadOrgTransactions — FX conversion", () => {
 
 describe("loadOrgTransactions — active data source scoping", () => {
   it("only reads transactions of the org's active data source", async () => {
-    getActiveDataSourceId.mockResolvedValueOnce("ds-2024");
+    getActiveDataSourceIds.mockResolvedValueOnce(["ds-2024"]);
     queryMock.mockResolvedValueOnce({ rows: [txRow()] });
     queryMock.mockResolvedValueOnce({ rows: [{ default_currency: "EUR" }] });
     queryMock.mockResolvedValueOnce({ rows: [] });
     await loadOrgTransactions("org-A");
 
-    expect(getActiveDataSourceId).toHaveBeenCalledWith("org-A");
+    expect(getActiveDataSourceIds).toHaveBeenCalledWith("org-A");
     const [sql, params] = queryMock.mock.calls[0];
-    expect(sql).toMatch(/t\.data_source_id = \$3/);
-    expect(params).toEqual(["org-A", expect.any(Number), "ds-2024"]);
+    expect(sql).toMatch(/t\.data_source_id = ANY\(\$3\)/);
+    expect(params).toEqual(["org-A", expect.any(Number), ["ds-2024"]]);
+  });
+
+  it("reads transactions from every active data source when several are active", async () => {
+    getActiveDataSourceIds.mockResolvedValueOnce(["ds-2024", "ds-2025"]);
+    queryMock.mockResolvedValueOnce({ rows: [txRow(), txRow({ net_revenue: 50, gross_profit: 20 })] });
+    queryMock.mockResolvedValueOnce({ rows: [{ default_currency: "EUR" }] });
+    queryMock.mockResolvedValueOnce({ rows: [] });
+    const txs = await loadOrgTransactions("org-A");
+
+    expect(txs).toHaveLength(2);
+    const [, params] = queryMock.mock.calls[0];
+    expect(params).toEqual(["org-A", expect.any(Number), ["ds-2024", "ds-2025"]]);
   });
 
   it("returns no transactions, without touching the database, when the org has no usable source", async () => {
-    getActiveDataSourceId.mockResolvedValueOnce(null);
+    getActiveDataSourceIds.mockResolvedValueOnce([]);
     expect(await loadOrgTransactions("org-A")).toEqual([]);
     expect(queryMock).not.toHaveBeenCalled();
   });

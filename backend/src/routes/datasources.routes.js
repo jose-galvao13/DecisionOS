@@ -14,8 +14,9 @@ import { encryptJSON } from "../utils/crypto.js";
 import { writeAudit } from "../audit/auditLog.js";
 import { enqueueJob, getJob, listJobsForSource } from "../services/jobQueue.js";
 import { MAX_IMPORT_ROWS } from "../config/limits.js";
-import { getActiveDataSourceId, setActiveDataSource } from "../services/activeSource.js";
+import { getActiveDataSourceIds, setDataSourceActive } from "../services/activeSource.js";
 import { invalidateOrgAnalyticsCache } from "../services/analyticsEngine.js";
+import { checkActivationOverlap } from "../services/duplicateDetection.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -266,23 +267,35 @@ router.post("/postgres/commit", requireMinRole("admin"), async (req, res) => {
 router.get("/", async (req, res) => {
   const { limit, offset } = parsePagination(req.query, 50);
   const { rows } = await pool.query(
-    `SELECT id, name, type, status, source_schema, source_table, row_count, last_sync_at, created_at
-     FROM data_sources WHERE org_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    // quality_score = the file's latest quality report, so the Data page can show
+    // each file's quality without one extra request per file.
+    `SELECT d.id, d.name, d.type, d.status, d.source_schema, d.source_table, d.row_count, d.last_sync_at, d.created_at,
+            q.score AS quality_score
+       FROM data_sources d
+       LEFT JOIN LATERAL (
+         SELECT r.score FROM data_quality_reports r WHERE r.data_source_id = d.id ORDER BY r.created_at DESC LIMIT 1
+       ) q ON true
+      WHERE d.org_id = $1 ORDER BY d.created_at DESC LIMIT $2 OFFSET $3`,
     [req.user.orgId, limit, offset]
   );
   const { rows: countRows } = await pool.query(`SELECT COUNT(*) FROM data_sources WHERE org_id = $1`, [req.user.orgId]);
-  // Which of them the dashboards are currently built from (see services/activeSource.js).
-  const activeId = await getActiveDataSourceId(req.user.orgId);
+  // Which of them the dashboards are currently built from, combined (see services/activeSource.js).
+  const activeIds = new Set(await getActiveDataSourceIds(req.user.orgId));
   res.json({
-    dataSources: rows.map((r) => ({ ...r, is_active: r.id === activeId })),
+    // score is a Postgres NUMERIC, which the driver returns as a string
+    dataSources: rows.map((r) => ({ ...r, quality_score: r.quality_score == null ? null : Number(r.quality_score), is_active: activeIds.has(r.id) })),
     total: Number(countRows[0].count),
     limit,
     offset,
   });
 });
 
-// Switch which file/source the whole organization looks at. Only sources
-// that actually finished importing can be chosen.
+// Toggle whether a file/source feeds the organization's analytics. Several
+// can be active at once — turning one on adds it to the set instead of
+// replacing whatever was active before. Only sources that actually
+// finished importing can be turned on; turning off the last active source
+// is refused so the org is never left analysing nothing on purpose (remove
+// the file instead, or add another one first).
 router.post("/:id/activate", requireMinRole("manager"), async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, name, type, status, row_count FROM data_sources WHERE id = $1 AND org_id = $2`,
@@ -290,18 +303,52 @@ router.post("/:id/activate", requireMinRole("manager"), async (req, res) => {
   );
   if (!rows.length) return res.status(404).json({ error: "data source not found" });
   const source = rows[0];
+
+  const before = await getActiveDataSourceIds(req.user.orgId);
+  const wasActive = before.includes(source.id);
+
+  if (wasActive) {
+    // Turning off.
+    if (before.length <= 1) {
+      return res.status(409).json({ error: "at least one data source must stay active — activate another one first" });
+    }
+    await setDataSourceActive(req.user.orgId, source.id, false);
+    invalidateOrgAnalyticsCache(req.user.orgId);
+    await writeAudit({
+      orgId: req.user.orgId, userId: req.user.id, action: "data_source.deactivated",
+      objectType: "data_source", objectId: source.id,
+      before: { activeDataSourceIds: before }, after: { activeDataSourceIds: before.filter((id) => id !== source.id) },
+    });
+    return res.json({ dataSourceId: source.id, active: false, activeDataSourceIds: before.filter((id) => id !== source.id) });
+  }
+
+  // Turning on.
   if (source.status !== "connected" || !(Number(source.row_count) > 0)) {
     return res.status(409).json({ error: "this data source has no imported data — finish or retry the import first" });
   }
-  const before = await getActiveDataSourceId(req.user.orgId);
-  await setActiveDataSource(req.user.orgId, source.id);
-  invalidateOrgAnalyticsCache(req.user.orgId); // next dashboard/advisor call recomputes from this file
+  const { overlaps } = await checkActivationOverlap(req.user.orgId, source.id, before);
+  const duplicateOverlaps = overlaps.filter((o) => o.duplicateRowCount > 0);
+  if (duplicateOverlaps.length && req.query.ignoreDuplicates !== "true" && req.body?.ignoreDuplicates !== true) {
+    return res.status(409).json({
+      error: "this file overlaps with an already-active file and shares rows that look duplicated",
+      code: "possible_duplicates",
+      overlaps: duplicateOverlaps,
+    });
+  }
+  // `before` may include a source that is only active by fallback (nothing
+  // explicitly marked yet) — persist that choice explicitly first, so
+  // adding the new one is a genuine *addition* rather than accidentally
+  // dropping the implicit one the moment any source gets an explicit flag.
+  for (const id of before) await setDataSourceActive(req.user.orgId, id, true);
+  await setDataSourceActive(req.user.orgId, source.id, true);
+  invalidateOrgAnalyticsCache(req.user.orgId); // next dashboard/advisor call recomputes with this file included
+  const after = [...before, source.id];
   await writeAudit({
     orgId: req.user.orgId, userId: req.user.id, action: "data_source.activated",
     objectType: "data_source", objectId: source.id,
-    before: { activeDataSourceId: before }, after: { activeDataSourceId: source.id, name: source.name },
+    before: { activeDataSourceIds: before }, after: { activeDataSourceIds: after, name: source.name },
   });
-  res.json({ dataSourceId: source.id, active: true });
+  res.json({ dataSourceId: source.id, active: true, activeDataSourceIds: after });
 });
 
 // Remove a file/source and everything imported from it (transactions,
@@ -321,7 +368,10 @@ router.delete("/:id", requireMinRole("manager"), async (req, res) => {
     objectType: "data_source", objectId: source.id,
     before: { name: source.name, type: source.type, rowCount: Number(source.row_count) },
   });
-  res.json({ deleted: true, activeDataSourceId: await getActiveDataSourceId(req.user.orgId) });
+  const activeDataSourceIds = await getActiveDataSourceIds(req.user.orgId);
+  // activeDataSourceId (singular) kept for older frontends/tests: the first
+  // of the remaining active set, or null once none are left.
+  res.json({ deleted: true, activeDataSourceId: activeDataSourceIds[0] ?? null, activeDataSourceIds });
 });
 
 // Everything the "Details" dialog shows about one file. Explicit column list on

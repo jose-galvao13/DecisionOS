@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, FileSpreadsheet, Plus, ShieldCheck, Trash2, Check, Loader2, Pencil, Info, Download, X } from "lucide-react";
+import { Database, FileSpreadsheet, Plus, Trash2, Check, Loader2, Pencil, Info, Download, X } from "lucide-react";
 import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { Card, SectionTitle, JobProgress, ActionMenu } from "../../components/ui";
@@ -7,10 +7,12 @@ import SourceDetailsModal from "./SourceDetailsModal";
 
 /* ---------------------------------------------------------------
    DATA PAGE — every file / source the organization has uploaded.
-   Only one is "active" at a time: that one feeds the dashboards, the
-   analytics, the AI advisor and the reports (backend:
-   services/activeSource.js). Here you can keep several, switch which
-   one is active, add another file, or remove one.
+   Any number of them can be *included in the analysis* at once: the
+   included files feed the dashboards, the analytics, the AI advisor and
+   the reports together, the others are kept but don't count (backend:
+   services/activeSource.js). Here you switch each file in or out, add
+   another file, rename, export or remove one, and see each file's own
+   quality at a glance.
 ----------------------------------------------------------------*/
 
 function statusOf(source, t, locale) {
@@ -21,11 +23,42 @@ function statusOf(source, t, locale) {
   return { color: C.green, text: t("data.connectedRows", { n: source.row_count ?? 0 }) + when };
 }
 
-function SourceRow({ source, active, busy, exporting, canManage, hasList, onActivate, onRemove, onRename, onExport, onDetails }) {
+const isUsable = (s) => s.status === "connected" && Number(s.row_count) > 0;
+
+// Same thresholds as the Data Quality Center's score.
+const qualityColor = (score) => (score >= 90 ? C.green : score >= 70 ? C.yellow : C.red);
+
+/** Accessible on/off switch. */
+function Switch({ checked, onChange, disabled, busy, label, title }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {busy && <Loader2 size={13} className="animate-spin" color={C.textMuted} />}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        title={title}
+        disabled={disabled}
+        onClick={onChange}
+        className="relative shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ width: 36, height: 20, background: checked ? C.blue : C.greyBorder, border: `1px solid ${checked ? C.blue : C.textMuted}` }}
+      >
+        <span
+          className="absolute rounded-full transition-transform"
+          style={{ top: 1, left: 1, width: 16, height: 16, background: C.white, transform: checked ? "translateX(16px)" : "translateX(0)" }}
+        />
+      </button>
+    </span>
+  );
+}
+
+function SourceRow({ source, included, lastIncluded, busy, exporting, canManage, hasList, onToggle, onRemove, onRename, onExport, onDetails }) {
   const { t, locale } = useLang();
   const status = statusOf(source, t, locale);
-  const usable = source.status === "connected" && Number(source.row_count) > 0;
+  const usable = isUsable(source);
   const Icon = source.type === "excel" ? FileSpreadsheet : Database;
+  const score = source.quality_score == null ? null : Number(source.quality_score);
 
   // Rename happens in place: the name turns into a text field.
   const [editing, setEditing] = React.useState(false);
@@ -47,10 +80,11 @@ function SourceRow({ source, active, busy, exporting, canManage, hasList, onActi
     <div
       data-testid="source-row"
       className="flex items-center justify-between gap-3 p-4 rounded-xl"
-      style={{ border: `1px solid ${active ? C.blue : C.greyBorder}`, background: active ? C.blueSoft : "transparent" }}
+      data-included={included ? "true" : "false"}
+      style={{ border: `1px solid ${included ? C.blue : C.greyBorder}`, background: included ? C.blueSoft : "transparent" }}
     >
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: active ? C.surface : C.blueSoft }}>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: included ? C.surface : C.blueSoft }}>
           <Icon size={18} color={C.blue} />
         </div>
         <div className="min-w-0 flex-1">
@@ -95,30 +129,42 @@ function SourceRow({ source, active, busy, exporting, canManage, hasList, onActi
           ) : (
             <div className="flex items-center gap-2">
               <span className="font-semibold truncate" style={{ color: C.charcoal }}>{source.name}</span>
-              {active && (
+              {included && !canManage && (
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0" style={{ background: C.blue, color: C.white }}>
-                  {t("data.active")}
+                  {t("data.included")}
                 </span>
               )}
             </div>
           )}
-          <div className="text-sm flex items-center gap-1.5 mt-0.5" style={{ color: C.textSecondary }}>
+          <div className="text-sm flex items-center gap-1.5 mt-0.5 flex-wrap" style={{ color: C.textSecondary }}>
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: status.color }} /> {status.text}
+            {usable && score !== null && Number.isFinite(score) && (
+              <span
+                data-testid="quality-chip"
+                className="text-[11px] font-semibold px-2 py-0.5 rounded-full tabnum"
+                style={{ color: qualityColor(score), border: `1px solid ${qualityColor(score)}` }}
+              >
+                {t("data.qualityChip", { pct: Math.round(score) })}
+              </span>
+            )}
           </div>
         </div>
       </div>
 
       {hasList && !editing && (
-        <div className="flex items-center gap-2 shrink-0">
-          {canManage && !active && usable && (
-            <button
-              onClick={() => onActivate(source)}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              style={{ background: C.blue, color: C.white }}
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {t("data.useFile")}
-            </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {canManage && usable && (
+            <span className="inline-flex items-center gap-2 text-sm" style={{ color: C.textSecondary }}>
+              <span>{t("data.include")}</span>
+              <Switch
+                checked={included}
+                busy={busy}
+                disabled={busy || lastIncluded}
+                onChange={() => onToggle(source)}
+                label={t("data.toggleLabel", { name: source.name })}
+                title={lastIncluded ? t("data.lastIncludedHint") : undefined}
+              />
+            </span>
           )}
           <ActionMenu
             label={t("data.moreOptions", { name: source.name })}
@@ -137,18 +183,26 @@ function SourceRow({ source, active, busy, exporting, canManage, hasList, onActi
   );
 }
 
-function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources = [], activeId, onActivate, onRemove, onRename, onExport, busyId, exportingId, canManage = true }) {
-  const { t } = useLang();
+// `analytics` and `quality` are accepted for the callers that still pass them;
+// quality is shown per file now (the chip on each row and the details window),
+// since one report can't stand for several included files.
+function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources = [], activeIds, onToggle, onRemove, onRename, onExport, busyId, exportingId, canManage = true }) {
+  const { t, locale } = useLang();
   const [detailsFor, setDetailsFor] = React.useState(null);
 
   // If the list hasn't loaded (or the backend is older than the list feature)
   // still show the file that is in use, so the page is never empty.
-  const rows = sources.length
-    ? sources
-    : sourceInfo.type !== "demo"
-    ? [{ id: sourceInfo.dataSourceId ?? "current", name: sourceInfo.name, type: sourceInfo.type, status: "connected", row_count: sourceInfo.rows, last_sync_at: sourceInfo.lastUpdated }]
-    : [];
-  const currentId = activeId ?? sourceInfo.dataSourceId;
+  const fallbackRows =
+    !sources.length && sourceInfo.type !== "demo"
+      ? [{ id: sourceInfo.dataSourceId ?? "current", name: sourceInfo.name, type: sourceInfo.type, status: "connected", row_count: sourceInfo.rows, last_sync_at: sourceInfo.lastUpdated }]
+      : [];
+  const rows = sources.length ? sources : fallbackRows;
+
+  // Which files are in the analysis right now: the shell says (activeIds), else the list's own flag.
+  const includedSet = new Set(sources.length ? activeIds ?? sources.filter((s) => s.is_active).map((s) => s.id) : fallbackRows.map((r) => r.id));
+  const usableRows = rows.filter(isUsable);
+  const includedRows = rows.filter((r) => includedSet.has(r.id));
+  const includedRowCount = includedRows.reduce((sum, r) => sum + (Number(r.row_count) || 0), 0);
 
   return (
     <div>
@@ -171,6 +225,12 @@ function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources =
           )}
         </div>
 
+        {sources.length > 0 && includedRows.length > 0 && (
+          <p data-testid="included-summary" className="text-sm mt-3 tabnum" style={{ color: C.textMuted }}>
+            {t("data.includedSummary", { n: includedRows.length, total: usableRows.length, rows: includedRowCount.toLocaleString(locale) })}
+          </p>
+        )}
+
         <div className="mt-4 space-y-3">
           {rows.length === 0 && (
             // demo mode: nothing uploaded yet
@@ -190,12 +250,13 @@ function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources =
             <SourceRow
               key={s.id}
               source={s}
-              active={s.id === currentId}
+              included={includedSet.has(s.id)}
+              lastIncluded={includedSet.has(s.id) && includedSet.size <= 1}
               busy={busyId === s.id}
               exporting={exportingId === s.id}
               canManage={canManage}
               hasList={sources.length > 0}
-              onActivate={onActivate}
+              onToggle={onToggle}
               onRemove={onRemove}
               onRename={onRename}
               onExport={onExport}
@@ -218,23 +279,8 @@ function DataPage({ analytics, sourceInfo, quality, onAdd, replaceJob, sources =
         )}
       </Card>
 
-      {detailsFor && <SourceDetailsModal source={detailsFor} active={detailsFor.id === currentId} onClose={() => setDetailsFor(null)} />}
+      {detailsFor && <SourceDetailsModal source={detailsFor} active={includedSet.has(detailsFor.id)} onClose={() => setDetailsFor(null)} />}
 
-      {quality && (
-        <Card className="p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <ShieldCheck size={16} color={C.green} />
-            <span className="text-sm font-semibold" style={{ color: C.charcoal }}>{t("data.quality")}</span>
-            <span className="tabnum ml-auto text-sm font-semibold" style={{ color: C.green }}>{t("data.healthy", { pct: quality.healthPct })}</span>
-          </div>
-          <div className="grid grid-cols-4 gap-3">
-            <div className="p-3 rounded-xl" style={{ background: C.greyBg }}><div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{quality.missingPct ?? "—"}</div><div className="text-xs mt-0.5" style={{ color: C.textSecondary }}>{t("quality.missing")}</div></div>
-            <div className="p-3 rounded-xl" style={{ background: C.greyBg }}><div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{quality.duplicates ?? "—"}</div><div className="text-xs mt-0.5" style={{ color: C.textSecondary }}>{t("quality.duplicates")}</div></div>
-            <div className="p-3 rounded-xl" style={{ background: C.greyBg }}><div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{quality.invalidIds ?? "—"}</div><div className="text-xs mt-0.5" style={{ color: C.textSecondary }}>{t("quality.invalidIds")}</div></div>
-            <div className="p-3 rounded-xl" style={{ background: C.greyBg }}><div className="tabnum text-lg font-semibold" style={{ color: C.charcoal }}>{quality.inconsistent ?? "—"}</div><div className="text-xs mt-0.5" style={{ color: C.textSecondary }}>{t("quality.inconsistent")}</div></div>
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
