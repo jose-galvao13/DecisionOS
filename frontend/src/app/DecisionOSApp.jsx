@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
-  Search, AlertTriangle, Gauge, Building2, Zap, Loader2, Users,
+  AlertTriangle, Gauge, Building2, Zap, Loader2, Users,
   LayoutGrid, BarChart3, TrendingDown, LineChart as LineChartIcon,
   SlidersHorizontal, Sparkles, Database, FileSpreadsheet, Settings, ShieldCheck, ClipboardCheck,
 } from "lucide-react";
@@ -18,6 +18,7 @@ import LangSwitch from "../components/LangSwitch";
 import ThemeSwitch from "../components/ThemeSwitch";
 import NotificationBell from "../components/NotificationBell";
 import UserMenu from "../components/UserMenu";
+import GlobalSearch from "../components/GlobalSearch";
 
 // Lazy-loaded: each page becomes its own chunk instead of one ~700KB
 // bundle. Nothing here needs to be ready before first paint — the shell
@@ -53,6 +54,12 @@ const NAV_SECONDARY = [
   { id: "reports", key: "nav.reports", icon: FileSpreadsheet },
   { id: "settings", key: "nav.settings", icon: Settings },
 ];
+
+// Everything the header search can jump to (kept module-level so its identity is stable).
+const SEARCH_PAGES = [...NAV_MAIN, ...NAV_SECONDARY];
+// Views that show the filter bar — a product/region/channel picked in the search
+// only makes sense on one of these.
+const FILTERED_VIEWS = ["overview", "bi", "profit", "customers", "invest", "sim", "advisor"];
 
 function hydrateAnalytics(data, locale) {
   if (!data) return null;
@@ -294,7 +301,19 @@ function DecisionOSApp({ user, onLogout }) {
     }
   };
 
-  const showFilterBar = ["overview", "bi", "profit", "customers", "invest", "sim", "advisor"].includes(view);
+  const showFilterBar = FILTERED_VIEWS.includes(view);
+
+  // A pick in the header search: open a page, apply a product/region/channel
+  // filter, or open the Data page for a file.
+  const handleSearchSelect = (action) => {
+    if (!action) return;
+    if (action.type === "page") setView(action.id);
+    else if (action.type === "source") setView("data");
+    else if (action.type === "filter") {
+      setFilters((f) => ({ ...f, [action.dim]: action.value }));
+      setView((v) => (FILTERED_VIEWS.includes(v) ? v : "overview"));
+    }
+  };
 
   const renderView = () => {
     // The account page has nothing to do with the loaded data, so it must open
@@ -363,9 +382,7 @@ function DecisionOSApp({ user, onLogout }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="app-header h-16 shrink-0 flex items-center justify-between px-6" style={{ background: C.surface, borderBottom: `1px solid ${C.greyBorder}` }}>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ background: C.greyBg, width: 320 }}>
-            <Search size={15} color={C.textMuted} /><span className="text-sm" style={{ color: C.textMuted }}>{t("search.placeholder")}</span>
-          </div>
+          <GlobalSearch pages={SEARCH_PAGES} analytics={analytics} sources={dataSources} onSelect={handleSearchSelect} />
           <div className="flex items-center gap-4">
             <ThemeSwitch />
             <LangSwitch />

@@ -16,6 +16,10 @@ const STRINGS = {
     "nav.dataQuality": "Qualidade dos dados", "nav.products": "Produtos",
     "execMode.on": "Modo executivo: ligado", "execMode.off": "Modo executivo",
     "search.placeholder": "Pesquisar…",
+    "search.clear": "Limpar pesquisa",
+    "search.noResults": "Sem resultados para \"{q}\"",
+    "search.group.pages": "Páginas", "search.group.products": "Produtos", "search.group.regions": "Regiões",
+    "search.group.channels": "Canais", "search.group.files": "Ficheiros",
     "header.demoData": "Dados de demonstração", "header.connected": "ligado",
     "underConstruction.desc": "Esta área está em construção nesta demonstração.",
 
@@ -341,6 +345,10 @@ const STRINGS = {
     "nav.dataQuality": "Data quality", "nav.products": "Products",
     "execMode.on": "Executive mode: on", "execMode.off": "Executive mode",
     "search.placeholder": "Search…",
+    "search.clear": "Clear search",
+    "search.noResults": "No results for \"{q}\"",
+    "search.group.pages": "Pages", "search.group.products": "Products", "search.group.regions": "Regions",
+    "search.group.channels": "Channels", "search.group.files": "Files",
     "header.demoData": "Demo data", "header.connected": "connected",
     "underConstruction.desc": "This area is under construction in this demo.",
 
