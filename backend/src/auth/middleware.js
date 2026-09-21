@@ -1,4 +1,5 @@
 import { verifyToken } from "./jwt.js";
+import { isTokenRevoked } from "./sessionRegistry.js";
 
 // Owner sees everything; each step down is a strict subset, matching the
 // roadmap: CEO(owner)/Admin -> full; Finance -> financial data + simulator +
@@ -13,6 +14,10 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: "missing bearer token" });
   try {
     const payload = verifyToken(token);
+    if (isTokenRevoked(payload)) {
+      // deactivated, or password/role changed after this token was issued
+      return res.status(401).json({ error: "session ended — please sign in again" });
+    }
     // req.user.orgId is the ONLY source of tenant scoping for every route
     // that follows — never trust an orgId passed in a request body.
     req.user = { id: payload.sub, orgId: payload.orgId, role: payload.role, email: payload.email };

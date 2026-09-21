@@ -4,6 +4,8 @@ import { pool } from "../db/pool.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { signToken } from "../auth/jwt.js";
 import { requireAuth } from "../auth/middleware.js";
+import { passwordProblem } from "../auth/passwordPolicy.js";
+import { revokeUserSessions } from "../services/userAdmin.js";
 import { writeAudit } from "../audit/auditLog.js";
 
 const router = Router();
@@ -68,6 +70,11 @@ router.post("/login", async (req, res) => {
   if (!user || !(await verifyPassword(password, user.password_hash))) {
     return res.status(401).json({ error: "invalid email or password" });
   }
+  // Checked after the password on purpose: only someone who knows the right
+  // password learns the account exists but is switched off.
+  if (user.disabled_at) {
+    return res.status(403).json({ error: "this account has been deactivated — contact your administrator" });
+  }
   const token = signToken({ sub: user.id, orgId: user.org_id, role: user.role, email: user.email });
   res.json({ token, user: publicUser(user) });
 });
@@ -78,7 +85,32 @@ router.get("/me", requireAuth, async (req, res) => {
     [req.user.id]
   );
   if (!rows.length) return res.status(404).json({ error: "user not found" });
+  if (rows[0].disabled_at) return res.status(401).json({ error: "this account has been deactivated" });
   res.json({ user: publicUser(rows[0]) });
+});
+
+/** Change your own password. Every other session of this account is cut, and a
+ *  fresh token is returned so the browser you are using stays signed in. */
+router.post("/change-password", requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (typeof currentPassword !== "string" || !currentPassword) {
+    return res.status(400).json({ error: "currentPassword and newPassword are required" });
+  }
+  const problem = passwordProblem(newPassword);
+  if (problem) return res.status(400).json({ error: problem });
+  if (newPassword === currentPassword) return res.status(400).json({ error: "the new password must be different from the current one" });
+
+  const { rows } = await pool.query("SELECT u.*, o.name AS org_name FROM users u JOIN organizations o ON o.id = u.org_id WHERE u.id = $1", [req.user.id]);
+  const user = rows[0];
+  if (!user || user.disabled_at) return res.status(401).json({ error: "invalid session" });
+  if (!(await verifyPassword(currentPassword, user.password_hash))) {
+    return res.status(400).json({ error: "the current password is incorrect" });
+  }
+  await pool.query("UPDATE users SET password_hash = $2 WHERE id = $1", [user.id, await hashPassword(newPassword)]);
+  await revokeUserSessions(user.id);
+  await writeAudit({ orgId: user.org_id, userId: user.id, action: "user.password_changed", objectType: "user", objectId: user.id });
+  const token = signToken({ sub: user.id, orgId: user.org_id, role: user.role, email: user.email });
+  res.json({ token });
 });
 
 export default router;

@@ -5,6 +5,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { AI_TOOLS_SCHEMA, runTool } from "./analytics-tools.js";
 import { migrate } from "./db/migrate.js";
+import { loadSessionState } from "./services/userAdmin.js";
 import { startWorker } from "./worker.js";
 import { startMeasurementLoop } from "./services/measurementEngine.js";
 import { requireAuth } from "./auth/middleware.js";
@@ -16,6 +17,7 @@ import analyticsRoutes from "./routes/analytics.routes.js";
 import decisionsRoutes from "./routes/decisions.routes.js";
 import decisionRecordsRoutes from "./routes/decisionRecords.routes.js";
 import simulationRoutes from "./routes/simulation.routes.js";
+import notificationsRoutes from "./routes/notifications.routes.js";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -78,6 +80,7 @@ app.use("/api/decisions", decisionsRoutes);
 // actually decided (DECIDE/ACT/MEASURE) — see decisionRecords.js's header.
 app.use("/api/decision-log", decisionRecordsRoutes);
 app.use("/api/simulate", simulationRoutes);
+app.use("/api/notifications", notificationsRoutes);
 
 async function callAnthropic(body) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -222,6 +225,11 @@ async function start() {
     await migrate().catch((e) => {
       console.error("[decisionos-backend] failed to migrate schema on startup — continuing, but /api/auth etc. will fail", e.message);
     });
+  }
+  if (process.env.DATABASE_URL) {
+    // Before accepting requests: people deactivated (or whose sessions were cut)
+    // must stay locked out across a restart.
+    await loadSessionState().catch((e) => console.error("[decisionos-backend] couldn't load revoked sessions", e.message));
   }
   const httpServer = await new Promise((resolve) => {
     const srv = app.listen(PORT, () => {

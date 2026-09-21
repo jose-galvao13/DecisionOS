@@ -198,6 +198,7 @@ describe("switching files inside the app", () => {
   let sources; // server-side truth
   let active;
   let calls;
+  let notificationsPayload;
 
   beforeEach(() => {
     sources = [
@@ -206,6 +207,7 @@ describe("switching files inside the app", () => {
     ];
     active = "b";
     calls = [];
+    notificationsPayload = { notifications: [], unreadCount: 0 };
     apiFetch.mockReset();
     apiFetch.mockImplementation(async (path, opts = {}) => {
       calls.push(`${opts.method || "GET"} ${path.split("?")[0]}`);
@@ -231,6 +233,8 @@ describe("switching files inside the app", () => {
           columnMapping: { date: "Dia da venda", revenue: "Valor líquido", customer: "Nome cliente" }, dateRange: { from: "2024-01-01", to: "2024-12-31" },
         };
       }
+      if (path === "/api/notifications") return notificationsPayload;
+      if (path === "/api/notifications/read") return { marked: 1 };
       if (path.startsWith("/api/analytics/full")) return analyticsPayload;
       if (path.startsWith("/api/decisions")) return { decisions: [] };
       throw new Error(`unexpected request ${path}`);
@@ -240,7 +244,7 @@ describe("switching files inside the app", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const openApp = async (role = "owner") => {
-    wrap(<DecisionOSApp user={{ name: "Maria", orgName: "Acme Lda", role }} onLogout={() => {}} />);
+    wrap(<DecisionOSApp user={{ id: "me", name: "Maria", email: "maria@acme.pt", orgName: "Acme Lda", role }} onLogout={() => {}} />);
     await screen.findByText("vendas-2025.xlsx"); // header shows the active file
     fireEvent.click(screen.getByRole("button", { name: "Dados" }));
     await screen.findAllByTestId("source-row");
@@ -368,5 +372,66 @@ describe("switching files inside the app", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Fechar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("the avatar opens a user menu with the way into 'My account' (and the Team tab for an owner)", async () => {
+    await openApp("owner");
+    fireEvent.click(screen.getByRole("button", { name: "Menu do utilizador" }));
+    expect(screen.getByText("maria@acme.pt")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "A minha conta" }));
+    expect(await screen.findByRole("heading", { name: "A minha conta" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Equipa" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Perfil", selected: true })).toBeInTheDocument();
+  });
+
+  it("'Equipa' in the user menu goes straight to the team tab; a viewer has neither the menu entry nor the tab", async () => {
+    await openApp("owner");
+    apiFetch.mockImplementation(async (path, opts = {}) => (path === "/api/org/users" ? { users: [] } : path === "/api/notifications" ? notificationsPayload : { dataSources: [] }));
+    fireEvent.click(screen.getByRole("button", { name: "Menu do utilizador" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Equipa" }));
+    expect(await screen.findByRole("tab", { name: "Equipa", selected: true })).toBeInTheDocument();
+    expect(await screen.findByText("Adicionar colaborador")).toBeInTheDocument();
+  });
+
+  it("a viewer's menu has no Team entry, and the account page only offers the profile", async () => {
+    await openApp("viewer");
+    fireEvent.click(screen.getByRole("button", { name: "Menu do utilizador" }));
+    expect(screen.queryByRole("menuitem", { name: "Equipa" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "A minha conta" }));
+    expect(await screen.findByRole("heading", { name: "A minha conta" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Equipa" })).not.toBeInTheDocument();
+  });
+
+  it("the user menu still signs out", async () => {
+    const onLogout = vi.fn();
+    wrap(<DecisionOSApp user={{ id: "me", name: "Maria", orgName: "Acme Lda", role: "owner" }} onLogout={onLogout} />);
+    await screen.findByText("vendas-2025.xlsx");
+    fireEvent.click(screen.getByRole("button", { name: "Menu do utilizador" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Terminar sessão" }));
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("the account page opens even when there is no data to analyse", async () => {
+    await openApp("owner");
+    apiFetch.mockImplementation(async (path) => { throw new Error("analytics are down"); });
+    fireEvent.click(screen.getByRole("button", { name: "Menu do utilizador" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "A minha conta" }));
+    expect(await screen.findByRole("heading", { name: "A minha conta" })).toBeInTheDocument();
+  });
+
+  it("a notification in the bell takes you to the page it is about and counts down as you read", async () => {
+    notificationsPayload = {
+      unreadCount: 1,
+      notifications: [{ key: "import_failed:j1", kind: "import_failed", severity: "red", params: { name: "partido.xlsx", error: "file is empty" }, createdAt: new Date().toISOString(), target: { view: "data" }, read: false }],
+    };
+    wrap(<DecisionOSApp user={{ id: "me", name: "Maria", orgName: "Acme Lda", role: "owner" }} onLogout={() => {}} />);
+    await screen.findByText("vendas-2025.xlsx");
+    expect(await screen.findByTestId("bell-badge")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: /Notificações \(1 por ler\)/ }));
+    fireEvent.click(await screen.findByText("Falhou a importação de partido.xlsx"));
+
+    expect(await screen.findAllByTestId("source-row")).not.toHaveLength(0); // landed on the Data page
+    expect(apiFetch).toHaveBeenCalledWith("/api/notifications/read", { method: "POST", body: { keys: ["import_failed:j1"] } });
+    expect(screen.queryByTestId("bell-badge")).not.toBeInTheDocument();
   });
 });

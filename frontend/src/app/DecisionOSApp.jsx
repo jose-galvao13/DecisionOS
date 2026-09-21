@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "react";
 import {
-  Search, Bell, AlertTriangle, Gauge, Building2, Zap, Loader2, Users,
+  Search, AlertTriangle, Gauge, Building2, Zap, Loader2, Users,
   LayoutGrid, BarChart3, TrendingDown, LineChart as LineChartIcon,
   SlidersHorizontal, Sparkles, Database, FileSpreadsheet, Settings, ShieldCheck, ClipboardCheck,
 } from "lucide-react";
@@ -16,6 +16,8 @@ import FilterBar from "../components/FilterBar";
 import ChatWidget from "../components/ChatWidget";
 import LangSwitch from "../components/LangSwitch";
 import ThemeSwitch from "../components/ThemeSwitch";
+import NotificationBell from "../components/NotificationBell";
+import UserMenu from "../components/UserMenu";
 
 // Lazy-loaded: each page becomes its own chunk instead of one ~700KB
 // bundle. Nothing here needs to be ready before first paint — the shell
@@ -35,6 +37,7 @@ const CustomerIntelligenceView = lazy(() => import("../pages/Customers/CustomerI
 const ProductsPage = lazy(() => import("../pages/Products/ProductsPage"));
 const SettingsPage = lazy(() => import("../pages/Settings/SettingsPage"));
 const DecisionLogPage = lazy(() => import("../pages/Decisions/DecisionLogPage"));
+const AccountPage = lazy(() => import("../pages/Account/AccountPage"));
 
 const NAV_MAIN = [
   { id: "overview", key: "nav.overview", icon: LayoutGrid }, { id: "bi", key: "nav.bi", icon: BarChart3 },
@@ -68,6 +71,7 @@ function DecisionOSApp({ user, onLogout }) {
   const { t, lang, locale } = useLang();
   const toast = useToast();
   const [view, setView] = useState("overview");
+  const [accountTab, setAccountTab] = useState("profile"); // which tab of "My account" is open
   const [showOnboarding, setShowOnboarding] = useState(true);
   // Executive mode ON = charts visible (the default view); OFF = KPIs and AI summary only.
   const [execMode, setExecMode] = useState(true);
@@ -293,6 +297,9 @@ function DecisionOSApp({ user, onLogout }) {
   const showFilterBar = ["overview", "bi", "profit", "customers", "invest", "sim", "advisor"].includes(view);
 
   const renderView = () => {
+    // The account page has nothing to do with the loaded data, so it must open
+    // even while analytics are loading, failed, or there is no data yet.
+    if (view === "account") return <AccountPage user={user} tab={accountTab} onTabChange={setAccountTab} />;
     if (isBackendMode && analyticsLoading && !analytics) {
       return (
         <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -367,10 +374,8 @@ function DecisionOSApp({ user, onLogout }) {
               <span style={{ color: C.charcoal }}>{sourceInfo.type !== "demo" ? sourceInfo.name : t("header.demoData")}</span>
               <span style={{ color: C.textMuted }}>· {t("header.connected")}</span>
             </button>
-            <Bell size={17} color={C.textSecondary} />
-            <button onClick={onLogout} title={t("auth.logout")} className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white" style={{ background: C.blueDark }}>
-              {(user?.name || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-            </button>
+            <NotificationBell onNavigate={(target) => target && setView(target)} />
+            <UserMenu user={user} onNavigate={(tab) => { setAccountTab(tab); setView("account"); }} onLogout={onLogout} />
           </div>
         </header>
         <main className="app-main flex-1 overflow-y-auto p-8">

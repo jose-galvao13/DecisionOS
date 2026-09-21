@@ -33,6 +33,26 @@ CREATE TABLE IF NOT EXISTS users (
   UNIQUE (email)
 );
 CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id);
+-- Team management. Users are never deleted: 8 other tables reference users(id)
+-- (decision owner/creator, data source uploader, audit log...), and losing
+-- "who did this" is not acceptable. A person who leaves the company is
+-- deactivated instead: they can't sign in, and every token they already hold
+-- stops working (auth/sessionRegistry.js).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMPTZ;
+-- Tokens issued before this instant are rejected (set on password reset, role
+-- change and deactivation). JWTs are otherwise valid for 7 days, so without
+-- this a demoted or removed person would keep their old access until expiry.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_valid_after TIMESTAMPTZ;
+
+-- Which notifications (the bell in the header) each person already read. The
+-- notifications themselves are derived from live data (services/notifications.js),
+-- so only the read marks need storing.
+CREATE TABLE IF NOT EXISTS notification_reads (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key     TEXT NOT NULL,
+  read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key)
+);
 
 -- FX rates — real currency conversion, not just labeling. Manager+
 -- sets "1 unit of `currency` = `rate_to_default` units of the org's
