@@ -18,6 +18,7 @@ import { claimNextJob, updateJobProgress, completeJob, failJob } from "./service
 import { getStaging, clearStaging } from "./services/staging.js";
 import { assessQuality } from "./services/dataQuality.js";
 import { importRows } from "./services/unifiedModel.js";
+import { importHoldings } from "./services/portfolioImport.js";
 import * as pgConnector from "./services/pgConnector.js";
 import { decryptJSON } from "./utils/crypto.js";
 import { writeAudit } from "./audit/auditLog.js";
@@ -38,6 +39,10 @@ async function saveQualityReport(orgId, dataSourceId, quality) {
 
 async function markSourceError(dataSourceId) {
   await pool.query("UPDATE data_sources SET status = 'error' WHERE id = $1", [dataSourceId]).catch(() => {});
+}
+
+async function markPortfolioImportError(importId) {
+  await pool.query("UPDATE portfolio_imports SET status = 'error' WHERE id = $1", [importId]).catch(() => {});
 }
 
 /** rows already in hand (excel staging) — assess, import, report. */
@@ -119,6 +124,35 @@ async function processImportExcel(job) {
   }
 }
 
+// Parte 2, FASE 1 — "Carteira por upload". Same staging + progress
+// pattern as processImportExcel above, writing into holdings instead of
+// transactions (importHoldings replaces this import's own positions —
+// see services/portfolioImport.js's header comment).
+async function processImportPortfolio(job) {
+  const { org_id: orgId } = job;
+  const { stagingId, mapping, importId } = job.payload || {};
+  const staged = getStaging(stagingId, orgId);
+  if (!staged) throw new Error("staging expired or not found — re-upload the file");
+  try {
+    await updateJobProgress(job.id, { stage: "importing", progress: 20 });
+    const result = await importHoldings({
+      orgId, importId, rows: staged.rows, mapping,
+      onProgress: (imported, total) => {
+        const pct = 20 + Math.round((imported / Math.max(total, 1)) * 70); // importing spans 20%..90%
+        updateJobProgress(job.id, { stage: "importing", progress: Math.min(pct, 90) }).catch(() => {});
+      },
+    });
+    await writeAudit({
+      orgId, userId: job.created_by, action: "portfolio_import.imported",
+      objectType: "portfolio_import", objectId: importId,
+      after: { imported: result.imported, skipped: result.skipped },
+    });
+    return result;
+  } finally {
+    clearStaging(stagingId);
+  }
+}
+
 async function processImportOrRefreshPostgres(job, { isRefresh }) {
   const { org_id: orgId, data_source_id: dataSourceId } = job;
   const { rows: sourceRows } = await pool.query(`SELECT * FROM data_sources WHERE id = $1 AND org_id = $2`, [dataSourceId, orgId]);
@@ -148,6 +182,8 @@ async function processJob(job) {
   switch (job.type) {
     case "import_excel":
       return processImportExcel(job);
+    case "import_portfolio":
+      return processImportPortfolio(job);
     case "import_postgres":
       return processImportOrRefreshPostgres(job, { isRefresh: false });
     case "refresh_postgres":
@@ -169,6 +205,9 @@ export async function runOnce() {
     console.error(`[worker] job ${job.id} (${job.type}) failed:`, e.message);
     await failJob(job.id, e);
     if (job.data_source_id) await markSourceError(job.data_source_id);
+    if (job.type === "import_portfolio" && job.payload?.importId) {
+      await markPortfolioImportError(job.payload.importId);
+    }
   }
   return job;
 }

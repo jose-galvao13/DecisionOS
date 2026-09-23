@@ -149,6 +149,41 @@ const DOMAIN_VOCAB = {
     expectedPrimitive: "id",
     distribution: (p) => (looksIdentifierShaped(p) && p.uniqueRatio > 0.005 ? 0.5 : 0.1),
   },
+
+  // --- Parte 2, FASE 1 — carteira de ações (routes/portfolio.routes.js,
+  // services/portfolioImport.js). QUANTITY and DATE above are reused as-is
+  // (a holding's "quantidade" and "data de compra" need no new vocabulary);
+  // these three are the ones a sales/commerce sheet never has.
+  TICKER: {
+    category: "IDENTIFIER",
+    synonyms: ["ticker", "símbolo", "simbolo", "symbol", "ticker symbol", "código", "codigo"],
+    expectedPrimitive: "string",
+    // A ticker is short and mostly-unique, but it's alphabetic (AAPL,
+    // GALP.LS) rather than numeric-shaped, so looksIdentifierShaped() (built
+    // for numeric/ID columns) doesn't apply — this needs its own read of
+    // uniqueRatio instead.
+    distribution: (p) => {
+      if (p.primitiveType !== "string") return 0;
+      return p.uniqueRatio > 0.5 ? 0.7 : 0.3;
+    },
+  },
+  AVG_PRICE: {
+    category: "MEASURE",
+    synonyms: [
+      "preco medio", "preço médio", "avg price", "average price", "preco de compra",
+      "preço de compra", "cost basis", "custo medio", "custo médio",
+    ],
+    expectedPrimitive: "numeric",
+    distribution: (p) => (p.primitiveType === "numeric" && p.stats?.allPositive ? 0.6 : 0.2),
+  },
+  CURRENCY: {
+    category: "DIMENSION",
+    synonyms: ["moeda", "currency", "divisa", "ccy"],
+    expectedPrimitive: "string",
+    // A currency column is low-cardinality (EUR/USD/GBP repeated across
+    // rows) — same shape as CHANNEL above.
+    distribution: (p) => (p.primitiveType === "string" && p.uniqueRatio < 0.15 ? 0.75 : 0.2),
+  },
 };
 
 // ---------------------------------------------------------------------

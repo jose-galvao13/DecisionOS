@@ -18,6 +18,7 @@ import decisionsRoutes from "./routes/decisions.routes.js";
 import decisionRecordsRoutes from "./routes/decisionRecords.routes.js";
 import simulationRoutes from "./routes/simulation.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
+import portfolioRoutes from "./routes/portfolio.routes.js";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -69,6 +70,12 @@ app.use("/api/auth", authRoutes);
 app.use("/api/org", organizationsRoutes);
 app.use("/api/datasources", datasourcesRoutes);
 app.use("/api/analytics", analyticsRoutes);
+// Parte 2, FASE 1 — Carteira de ações (stock portfolio), by upload. Its
+// own model (portfolio_imports/holdings/security_prices — see
+// db/schema.sql) rather than data_sources/transactions, since a holding
+// isn't a sales transaction; the import plumbing (staging/jobQueue/worker)
+// is reused as-is.
+app.use("/api/portfolio", portfolioRoutes);
 
 // --- FASE 3 / FASE 4: Decision Engine + Simulation Engine, both built on
 // top of the same computeAnalyticsForOrg() the routes above already use. -

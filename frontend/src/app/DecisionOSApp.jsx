@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from "rea
 import {
   AlertTriangle, Gauge, Building2, Zap, Loader2, Users,
   LayoutGrid, BarChart3, TrendingDown, LineChart as LineChartIcon,
-  SlidersHorizontal, Sparkles, Database, FileSpreadsheet, Settings, ShieldCheck, ClipboardCheck,
+  SlidersHorizontal, Sparkles, Database, FileSpreadsheet, Settings, ShieldCheck, ClipboardCheck, PieChart,
 } from "lucide-react";
 import { C, fontImport } from "../lib/theme";
 import { useLang } from "../lib/i18n";
@@ -39,11 +39,13 @@ const ProductsPage = lazy(() => import("../pages/Products/ProductsPage"));
 const SettingsPage = lazy(() => import("../pages/Settings/SettingsPage"));
 const DecisionLogPage = lazy(() => import("../pages/Decisions/DecisionLogPage"));
 const AccountPage = lazy(() => import("../pages/Account/AccountPage"));
+const PortfolioPage = lazy(() => import("../pages/Portfolio/PortfolioPage"));
 
 const NAV_MAIN = [
   { id: "overview", key: "nav.overview", icon: LayoutGrid }, { id: "bi", key: "nav.bi", icon: BarChart3 },
   { id: "profit", key: "nav.profit", icon: TrendingDown }, { id: "customers", key: "nav.customers", icon: Users },
   { id: "invest", key: "nav.invest", icon: LineChartIcon },
+  { id: "portfolio", key: "nav.portfolio", icon: PieChart },
   { id: "sim", key: "nav.sim", icon: SlidersHorizontal }, { id: "advisor", key: "nav.advisor", icon: Sparkles },
   { id: "decisionLog", key: "nav.decisionLog", icon: ClipboardCheck },
 ];
@@ -375,6 +377,10 @@ function DecisionOSApp({ user, onLogout }) {
     // The account page has nothing to do with the loaded data, so it must open
     // even while analytics are loading, failed, or there is no data yet.
     if (view === "account") return <AccountPage user={user} tab={accountTab} onTabChange={setAccountTab} />;
+    // Portfolio has its own data (holdings/security_prices), independent of
+    // the sales unified model — it must render even in demo mode or while
+    // sales analytics are loading/erroring, same reasoning as "account" above.
+    if (view === "portfolio") return <PortfolioPage user={user} />;
     if (isBackendMode && analyticsLoading && !analytics) {
       return (
         <div className="flex flex-col items-center justify-center py-24 text-center">

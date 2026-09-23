@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   id             TEXT PRIMARY KEY,
   org_id         TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   data_source_id TEXT REFERENCES data_sources(id) ON DELETE CASCADE,
-  type           TEXT NOT NULL,     -- 'import_excel' | 'import_postgres' | 'refresh_postgres'
+  type           TEXT NOT NULL,     -- 'import_excel' | 'import_postgres' | 'refresh_postgres' | 'import_portfolio'
   status         TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','completed','failed')),
   stage          TEXT,              -- 'importing' | 'validating' | 'analytics' | 'completed' | ...
   progress       INTEGER NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
@@ -336,3 +336,72 @@ CREATE TABLE IF NOT EXISTS decision_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_decision_actions_decision ON decision_actions(decision_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_decision_actions_org ON decision_actions(org_id, status);
+
+-- Parte 2, FASE 1 — Carteira de ações ("stock portfolio"), por upload.
+-- Deliberately its own small model, not bolted onto data_sources/
+-- transactions: a holding (ticker, quantidade, preço médio) is not a
+-- sales transaction, and mixing them would force every sales-only column
+-- (customer_id, region_id, ...) to be nullable for no reason. The import
+-- envelope (`portfolio_imports`) mirrors `data_sources` on purpose —
+-- same id/org_id/name/status/row_count/created_by/created_at shape — so
+-- the worker/job-queue/staging plumbing built for Excel imports (FASE 1/8)
+-- can be reused as-is for this one instead of inventing a second pattern.
+CREATE TABLE IF NOT EXISTS portfolio_imports (
+  id          TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'syncing' CHECK (status IN ('syncing','connected','error')),
+  row_count   INTEGER NOT NULL DEFAULT 0,
+  created_by  TEXT REFERENCES users(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_portfolio_imports_org ON portfolio_imports(org_id, created_at DESC);
+
+-- One row per position, as imported. Several files can each hold a
+-- position in the same ticker (ponto 6: "todas as posições de todos os
+-- ficheiros somam-se por ticker") — that summing happens at query time
+-- (routes/portfolio.routes.js GET /holdings), not here; this table stays
+-- one row per (import, ticker) so re-importing a file can delete-and-
+-- reinsert just its own rows without touching any other file's positions,
+-- exactly like unifiedModel.js does for transactions per data_source_id.
+CREATE TABLE IF NOT EXISTS holdings (
+  id           TEXT PRIMARY KEY,
+  import_id    TEXT NOT NULL REFERENCES portfolio_imports(id) ON DELETE CASCADE,
+  org_id       TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  ticker       TEXT NOT NULL,
+  nome         TEXT,
+  quantidade   NUMERIC NOT NULL CHECK (quantidade > 0),
+  preco_medio  NUMERIC NOT NULL,
+  moeda        TEXT NOT NULL,
+  data_compra  DATE,
+  sector       TEXT,
+  pais         TEXT,
+  tipo_ativo   TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_holdings_import ON holdings(import_id);
+-- GET /holdings groups by (org_id, ticker) across every import — this is
+-- the index that query actually needs.
+CREATE INDEX IF NOT EXISTS idx_holdings_org_ticker ON holdings(org_id, ticker);
+
+-- Current/quoted price per ticker, independent of any one import (a price
+-- update shouldn't require re-uploading a holdings file). `origem` records
+-- provenance the same way `outcome_source` does on `decisions`: a fact,
+-- not a quality judgement. UNIQUE (org_id, ticker, data) lets a manual
+-- price update for "today" upsert cleanly instead of piling up duplicate
+-- rows for the same day.
+CREATE TABLE IF NOT EXISTS security_prices (
+  id          TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  ticker      TEXT NOT NULL,
+  preco       NUMERIC NOT NULL CHECK (preco > 0),
+  moeda       TEXT NOT NULL,
+  data        DATE NOT NULL DEFAULT CURRENT_DATE,
+  origem      TEXT NOT NULL DEFAULT 'manual' CHECK (origem IN ('manual','upload','api')),
+  created_by  TEXT REFERENCES users(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, ticker, data)
+);
+-- GET /holdings reads "the latest price per ticker" — DISTINCT ON (ticker)
+-- ordered by data DESC, created_at DESC; this index covers exactly that.
+CREATE INDEX IF NOT EXISTS idx_security_prices_org_ticker ON security_prices(org_id, ticker, data DESC, created_at DESC);

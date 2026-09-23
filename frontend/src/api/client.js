@@ -88,11 +88,15 @@ function saveBlob(blob, filename) {
    marks it completed/failed, calling onProgress after each poll so
    the UI can render a real progress bar instead of a bare spinner.
 ----------------------------------------------------------------*/
-async function pollJob(jobId, { onProgress, intervalMs = 1200, timeoutMs = 10 * 60 * 1000 } = {}) {
+async function pollJob(jobId, { onProgress, intervalMs = 1200, timeoutMs = 10 * 60 * 1000, path = "/api/datasources/jobs" } = {}) {
   const startedAt = Date.now();
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const job = await apiFetch(`/api/datasources/jobs/${jobId}`);
+    // `path` defaults to the datasources polling route — it's a generic
+    // job lookup (getJob() only checks org_id, not which route created
+    // the job), so /api/portfolio's import_portfolio jobs poll here too
+    // (see PortfolioPage.jsx) instead of duplicating this endpoint.
+    const job = await apiFetch(`${path}/${jobId}`);
     if (onProgress) onProgress(job);
     if (job.status === "completed") return job;
     if (job.status === "failed") throw new Error(job.error || "import failed");

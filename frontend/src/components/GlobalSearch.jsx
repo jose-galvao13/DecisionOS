@@ -28,6 +28,7 @@ const PAGE_KEYWORDS = {
   profit: "lucro margem margin fugas leakage rentabilidade custos costs",
   customers: "clientes churn retencao retention",
   invest: "investimento dcf valuation avaliacao roi",
+  portfolio: "acoes carteira risco stocks investimentos holdings bolsa titulos",
   sim: "simulacao simulation cenarios scenarios what-if",
   advisor: "ia ai assistente assistant recomendacao recommendation chat",
   decisionLog: "decisoes decisions historico history registo log",
