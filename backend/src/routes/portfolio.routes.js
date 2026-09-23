@@ -21,6 +21,9 @@ import { parseDate } from "../utils/parse.js";
 import { writeAudit } from "../audit/auditLog.js";
 import { enqueueJob } from "../services/jobQueue.js";
 import { MAX_IMPORT_ROWS } from "../config/limits.js";
+import { getCached, setCached } from "../services/cache.js";
+import { buildRateIndex } from "../services/fxRates.js";
+import { buildPortfolioAnalytics, invalidatePortfolioAnalyticsCache } from "../services/portfolioAnalytics.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -179,11 +182,13 @@ router.get("/imports", async (req, res) => {
   res.json({ imports: rows });
 });
 
-// Positions summed by ticker across every import this org has (ponto 6:
-// "todas as posições de todos os ficheiros somam-se por ticker" — there is
-// no concept of "which file a holding belongs to" once it's in the total).
-// preco_medio here is the quantity-weighted average across every lot.
-router.get("/holdings", async (req, res) => {
+/** Shared loader for both GET /holdings and GET /analytics: positions
+ *  summed by ticker across every import this org has (ponto 6: "todas as
+ *  posições de todos os ficheiros somam-se por ticker" — there is no
+ *  concept of "which file a holding belongs to" once it's in the total),
+ *  each joined to its latest known price (DISTINCT ON, newest first).
+ *  preco_medio is the quantity-weighted average across every lot. */
+async function loadAggregatedHoldings(orgId) {
   const { rows } = await pool.query(
     `SELECT h.ticker,
             SUM(h.quantidade)                                AS quantidade,
@@ -198,7 +203,7 @@ router.get("/holdings", async (req, res) => {
       WHERE h.org_id = $1
       GROUP BY h.ticker
       ORDER BY h.ticker`,
-    [req.user.orgId]
+    [orgId]
   );
 
   const tickers = rows.map((r) => r.ticker);
@@ -209,25 +214,16 @@ router.get("/holdings", async (req, res) => {
          FROM security_prices
         WHERE org_id = $1 AND ticker = ANY($2)
         ORDER BY ticker, data DESC, created_at DESC`,
-      [req.user.orgId, tickers]
+      [orgId, tickers]
     );
     latestByTicker = Object.fromEntries(priceRows.map((p) => [p.ticker, p]));
   }
 
-  let custoTotalSum = 0;
-  let valorAtualSum = 0;
-  const holdings = rows.map((r) => {
+  return rows.map((r) => {
     const quantidade = Number(r.quantidade);
     const precoMedio = Number(r.preco_medio);
-    const custoTotal = quantidade * precoMedio;
     const latest = latestByTicker[r.ticker];
     const precoAtual = latest ? Number(latest.preco) : null;
-    const valorAtual = precoAtual != null ? quantidade * precoAtual : null;
-    const ganhoPerdaAbs = valorAtual != null ? valorAtual - custoTotal : null;
-    const ganhoPerdaPct = valorAtual != null && custoTotal ? (ganhoPerdaAbs / custoTotal) * 100 : null;
-    custoTotalSum += custoTotal;
-    valorAtualSum += valorAtual != null ? valorAtual : custoTotal; // no quote yet: treat cost as the best-known value
-
     return {
       ticker: r.ticker,
       nome: r.nome,
@@ -237,14 +233,44 @@ router.get("/holdings", async (req, res) => {
       quantidade,
       precoMedio,
       moeda: r.moeda,
-      custoTotal,
       precoAtual,
-      valorAtual,
-      ganhoPerdaAbs,
-      ganhoPerdaPct,
       fileCount: Number(r.file_count),
       lastPriceDate: latest?.data || null,
       lastPriceSource: latest?.origem || null,
+    };
+  });
+}
+
+router.get("/holdings", async (req, res) => {
+  const positions = await loadAggregatedHoldings(req.user.orgId);
+
+  let custoTotalSum = 0;
+  let valorAtualSum = 0;
+  const holdings = positions.map((p) => {
+    const custoTotal = p.quantidade * p.precoMedio;
+    const valorAtual = p.precoAtual != null ? p.quantidade * p.precoAtual : null;
+    const ganhoPerdaAbs = valorAtual != null ? valorAtual - custoTotal : null;
+    const ganhoPerdaPct = valorAtual != null && custoTotal ? (ganhoPerdaAbs / custoTotal) * 100 : null;
+    custoTotalSum += custoTotal;
+    valorAtualSum += valorAtual != null ? valorAtual : custoTotal; // no quote yet: treat cost as the best-known value
+
+    return {
+      ticker: p.ticker,
+      nome: p.nome,
+      sector: p.sector,
+      pais: p.pais,
+      tipoAtivo: p.tipoAtivo,
+      quantidade: p.quantidade,
+      precoMedio: p.precoMedio,
+      moeda: p.moeda,
+      custoTotal,
+      precoAtual: p.precoAtual,
+      valorAtual,
+      ganhoPerdaAbs,
+      ganhoPerdaPct,
+      fileCount: p.fileCount,
+      lastPriceDate: p.lastPriceDate,
+      lastPriceSource: p.lastPriceSource,
     };
   });
 
@@ -252,6 +278,32 @@ router.get("/holdings", async (req, res) => {
     holdings,
     totals: { custoTotal: custoTotalSum, valorAtual: valorAtualSum },
   });
+});
+
+// FASE 2 ("Análise sem preços ao vivo"): weights, concentration (HHI +
+// top3), exposure by currency/sector/country and unrealized P&L — all
+// pure computation in services/portfolioAnalytics.js, fed by the same
+// aggregated positions GET /holdings uses. Cached per org for 60s (FASE
+// 8-style — see analyticsEngine.js's computeAnalyticsForOrg): a price
+// update or a completed import invalidates it explicitly (see PUT
+// /prices, DELETE /:id and worker.js) rather than waiting out the TTL.
+router.get("/analytics", async (req, res) => {
+  const orgId = req.user.orgId;
+  const cacheKey = `portfolio-analytics:${orgId}`;
+  const cached = getCached(cacheKey);
+  if (cached !== undefined) return res.json(cached);
+
+  const [positions, orgResult, rateResult] = await Promise.all([
+    loadAggregatedHoldings(orgId),
+    pool.query(`SELECT default_currency FROM organizations WHERE id = $1`, [orgId]),
+    pool.query(`SELECT currency, rate_to_default, effective_date FROM fx_rates WHERE org_id = $1`, [orgId]),
+  ]);
+  const defaultCurrency = orgResult.rows[0]?.default_currency || "EUR";
+  const rateIndex = buildRateIndex(rateResult.rows);
+
+  const analytics = buildPortfolioAnalytics(positions, { defaultCurrency, rateIndex });
+  setCached(cacheKey, analytics, 60_000);
+  res.json(analytics);
 });
 
 // Manual price entry (origem 'manual') for one ticker/day. Upserts on
@@ -282,6 +334,7 @@ router.put("/prices", requireMinRole("manager"), async (req, res) => {
     orgId: req.user.orgId, userId: req.user.id, action: "portfolio.price_updated",
     objectType: "security_price", objectId: t, after: rows[0],
   });
+  invalidatePortfolioAnalyticsCache(req.user.orgId);
   res.json(rows[0]);
 });
 
@@ -302,6 +355,7 @@ router.delete("/:id", requireMinRole("manager"), async (req, res) => {
     objectType: "portfolio_import", objectId: imp.id,
     before: { name: imp.name, rowCount: Number(imp.row_count) },
   });
+  invalidatePortfolioAnalyticsCache(req.user.orgId);
   res.json({ deleted: true });
 });
 

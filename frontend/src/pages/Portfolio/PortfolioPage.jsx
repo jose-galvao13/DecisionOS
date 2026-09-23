@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, TrendingUp, TrendingDown, RefreshCw, Loader2, PiggyBank } from "lucide-react";
-import { C } from "../../lib/theme";
+import { Upload, TrendingUp, TrendingDown, RefreshCw, Loader2, PiggyBank, AlertTriangle } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
+import { C, chartTooltip, barCursor } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { apiFetch, apiUpload, pollJob } from "../../api/client";
-import { Card, SectionTitle, EmptyState, JobProgress, useToast } from "../../components/ui";
+import { Card, SectionTitle, EmptyState, JobProgress, KPI, Pill, useToast } from "../../components/ui";
 
 // Mirrors DecisionOSApp.jsx's MANAGER_AND_ABOVE — kept as its own copy so
 // this page has no import-time dependency on the shell.
@@ -34,6 +37,28 @@ function formatMoney(value, currency, locale) {
   }
 }
 
+// Small horizontal bar chart for one exposure dimension (moeda/sector/pais).
+// Same visual language as BusinessIntelligence.jsx's byRegion chart (vertical
+// bar, no axis line, chartTooltip/barCursor from the shared theme) so this
+// page doesn't invent a second chart style.
+function ExposureBars({ data, t }) {
+  if (!data || !data.length) {
+    return <div className="text-sm py-6 text-center" style={{ color: C.textMuted }}>{t("portfolio.exposure.empty")}</div>;
+  }
+  const height = Math.max(80, data.length * 34);
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} layout="vertical" margin={{ left: 10, right: 20 }}>
+        <CartesianGrid stroke={C.greyBorderSoft} horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 12, fill: C.textMuted }} axisLine={false} tickLine={false} tickFormatter={(v) => `${Math.round(v)}%`} domain={[0, "dataMax"]} />
+        <YAxis type="category" dataKey="key" tick={{ fontSize: 12, fill: C.textSecondary }} axisLine={false} tickLine={false} width={70} />
+        <Tooltip {...chartTooltip} cursor={barCursor} formatter={(v) => `${v.toFixed(1)}%`} />
+        <Bar dataKey="pesoPct" radius={[0, 6, 6, 0]} fill={C.blue} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export default function PortfolioPage({ user }) {
   const { t, locale } = useLang();
   const toast = useToast();
@@ -44,6 +69,9 @@ export default function PortfolioPage({ user }) {
   const [totals, setTotals] = useState({ custoTotal: 0, valorAtual: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState("");
 
   const [preview, setPreview] = useState(null); // { stagingId, headers, sampleRows, suggestedMapping, issues, ... }
   const [mapping, setMapping] = useState({});
@@ -68,7 +96,20 @@ export default function PortfolioPage({ user }) {
     }
   };
 
-  useEffect(() => { loadHoldings(); }, []);
+  // Weights/HHI/exposure/warnings — computed server-side (FASE 2) from the
+  // same positions, cached 60s. Loaded alongside holdings, but its own
+  // failure doesn't block the (more essential) positions table/KPIs above.
+  const loadAnalytics = async () => {
+    setAnalyticsError("");
+    try {
+      const data = await apiFetch("/api/portfolio/analytics");
+      setAnalytics(data);
+    } catch (e) {
+      setAnalyticsError(e.message || t("portfolio.error.analytics"));
+    }
+  };
+
+  useEffect(() => { loadHoldings(); loadAnalytics(); }, []);
 
   const totalGainAbs = totals.valorAtual - totals.custoTotal;
   const totalGainPct = totals.custoTotal ? (totalGainAbs / totals.custoTotal) * 100 : 0;
@@ -108,6 +149,7 @@ export default function PortfolioPage({ user }) {
       setPreview(null);
       setFileName("");
       await loadHoldings();
+      await loadAnalytics();
     } catch (e) {
       toast.error(e.message || t("portfolio.error.commit"));
     } finally {
@@ -130,6 +172,7 @@ export default function PortfolioPage({ user }) {
       toast.success(t("portfolio.priceSaved", { ticker }));
       setPriceForm({ ticker: "", preco: "", moeda });
       await loadHoldings();
+      await loadAnalytics();
     } catch (e) {
       toast.error(e.message || t("portfolio.error.priceForm"));
     } finally {
@@ -140,6 +183,13 @@ export default function PortfolioPage({ user }) {
   const sortedHoldings = useMemo(
     () => [...holdings].sort((a, b) => (b.valorAtual ?? b.custoTotal) - (a.valorAtual ?? a.custoTotal)),
     [holdings]
+  );
+
+  // Ticker -> { pesoPct, semPreco, semTaxaCambio } from GET /api/portfolio/analytics,
+  // to annotate the positions table below without re-deriving any of it client-side.
+  const analyticsByTicker = useMemo(
+    () => Object.fromEntries((analytics?.positions || []).map((p) => [p.ticker, p])),
+    [analytics]
   );
 
   return (
@@ -225,6 +275,24 @@ export default function PortfolioPage({ user }) {
         </Card>
       )}
 
+      {analytics?.warnings?.length > 0 && (
+        <Card className="p-4 mb-5" style={{ borderColor: C.yellow }}>
+          <div className="flex items-center gap-2 mb-2 text-sm font-semibold" style={{ color: C.yellow }}>
+            <AlertTriangle size={15} /> {t("portfolio.warning.title")}
+          </div>
+          <div className="space-y-1">
+            {analytics.warnings.map((w) => (
+              <div key={w.code} className="text-xs px-2 py-1 rounded" style={{ background: C.yellowSoft, color: C.yellow }}>
+                {w.code === "sem_preco" && t("portfolio.warning.semPreco", { n: w.count ?? w.tickers?.length })}
+                {w.code === "sem_taxa_cambio" && t("portfolio.warning.semTaxaCambio", { n: w.count ?? w.tickers?.length, currency: analytics.defaultCurrency })}
+                {w.code === "sector_nd" && t("portfolio.warning.sectorNd", { n: w.count })}
+                {w.code === "pais_nd" && t("portfolio.warning.paisNd", { n: w.count })}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {error && !holdings.length ? (
         <EmptyState icon={PiggyBank} title={t("portfolio.error.load")} desc={error} />
       ) : loading ? (
@@ -253,7 +321,7 @@ export default function PortfolioPage({ user }) {
           </div>
 
           <Card className="p-0 overflow-hidden">
-            <div className="grid grid-cols-8 gap-2 px-4 py-2 text-xs font-semibold" style={{ background: C.greyBg, color: C.textSecondary }}>
+            <div className="grid grid-cols-9 gap-2 px-4 py-2 text-xs font-semibold" style={{ background: C.greyBg, color: C.textSecondary }}>
               <div>{t("portfolio.field.ticker")}</div>
               <div>{t("portfolio.field.name")}</div>
               <div className="text-right">{t("portfolio.field.quantity")}</div>
@@ -262,12 +330,18 @@ export default function PortfolioPage({ user }) {
               <div className="text-right">{t("portfolio.field.currentPrice")}</div>
               <div className="text-right">{t("portfolio.kpi.currentValue")}</div>
               <div className="text-right">{t("portfolio.kpi.gainLoss")}</div>
+              <div className="text-right">{t("portfolio.field.weight")}</div>
             </div>
             {sortedHoldings.map((h) => {
               const gain = h.ganhoPerdaAbs;
+              const a = analyticsByTicker[h.ticker];
               return (
-                <div key={h.ticker} className="grid grid-cols-8 gap-2 px-4 py-2.5 text-sm items-center" style={{ borderTop: `1px solid ${C.greyBorderSoft}` }}>
-                  <div className="font-medium" style={{ color: C.charcoal }}>{h.ticker}</div>
+                <div key={h.ticker} className="grid grid-cols-9 gap-2 px-4 py-2.5 text-sm items-center" style={{ borderTop: `1px solid ${C.greyBorderSoft}` }}>
+                  <div className="font-medium flex items-center gap-1.5" style={{ color: C.charcoal }}>
+                    {h.ticker}
+                    {a?.semPreco && <Pill tone="yellow">{t("portfolio.field.noQuote")}</Pill>}
+                    {a?.semTaxaCambio && <Pill tone="yellow">{t("portfolio.field.noFxRate")}</Pill>}
+                  </div>
                   <div className="truncate" style={{ color: C.textSecondary }}>{h.nome || "—"}</div>
                   <div className="text-right tabnum" style={{ color: C.charcoal }}>{h.quantidade.toLocaleString(locale)}</div>
                   <div className="text-right tabnum" style={{ color: C.charcoal }}>{formatMoney(h.precoMedio, h.moeda, locale)}</div>
@@ -279,10 +353,59 @@ export default function PortfolioPage({ user }) {
                   <div className="text-right tabnum" style={{ color: gain == null ? C.textMuted : gain >= 0 ? C.green : C.red }}>
                     {gain != null ? `${gain >= 0 ? "+" : ""}${h.ganhoPerdaPct.toFixed(1)}%` : "—"}
                   </div>
+                  <div className="text-right tabnum" style={{ color: a?.pesoPct == null ? C.textMuted : C.charcoal }}>
+                    {a?.pesoPct != null ? `${a.pesoPct.toFixed(1)}%` : "—"}
+                  </div>
                 </div>
               );
             })}
           </Card>
+
+          {analytics && (
+            <div className="mt-6">
+              <SectionTitle title={t("portfolio.analytics.title")} />
+
+              <div className="flex gap-3 mb-5 flex-wrap">
+                <KPI label={t("portfolio.kpi.currentValue")} value={formatMoney(analytics.totals.valorAtual, analytics.defaultCurrency, locale)} />
+                <KPI
+                  label={t("portfolio.kpi.unrealizedPnl")}
+                  value={formatMoney(analytics.totals.pnlNaoRealizado, analytics.defaultCurrency, locale)}
+                  delta={analytics.totals.pnlNaoRealizadoPct != null ? `${analytics.totals.pnlNaoRealizadoPct >= 0 ? "+" : ""}${analytics.totals.pnlNaoRealizadoPct.toFixed(1)}%` : null}
+                  deltaTone={analytics.totals.pnlNaoRealizado >= 0 ? "green" : "red"}
+                />
+                <KPI label={t("portfolio.kpi.hhi")} value={analytics.concentration.hhi.toFixed(3)} />
+                <KPI label={t("portfolio.kpi.effectiveN")} value={analytics.concentration.effectiveN.toFixed(1)} />
+              </div>
+
+              {analytics.concentration.top3.length > 0 && (
+                <Card className="p-5 mb-5">
+                  <div className="text-sm font-medium mb-3" style={{ color: C.charcoal }}>
+                    {t("portfolio.kpi.top3")} — {t("portfolio.concentration.top3Desc", { pct: analytics.concentration.top3Pct.toFixed(1) })}
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {analytics.concentration.top3.map((p) => (
+                      <Pill key={p.ticker} tone="blue">{p.ticker} · {p.pesoPct.toFixed(1)}%</Pill>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              <div className="grid grid-cols-3 gap-4">
+                <Card className="p-5">
+                  <div className="text-sm font-medium mb-3" style={{ color: C.charcoal }}>{t("portfolio.exposure.byCurrency")}</div>
+                  <ExposureBars data={analytics.exposures.byCurrency} t={t} />
+                </Card>
+                <Card className="p-5">
+                  <div className="text-sm font-medium mb-3" style={{ color: C.charcoal }}>{t("portfolio.exposure.bySector")}</div>
+                  <ExposureBars data={analytics.exposures.bySector} t={t} />
+                </Card>
+                <Card className="p-5">
+                  <div className="text-sm font-medium mb-3" style={{ color: C.charcoal }}>{t("portfolio.exposure.byCountry")}</div>
+                  <ExposureBars data={analytics.exposures.byCountry} t={t} />
+                </Card>
+              </div>
+            </div>
+          )}
         </>
       )}
 

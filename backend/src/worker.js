@@ -23,6 +23,7 @@ import * as pgConnector from "./services/pgConnector.js";
 import { decryptJSON } from "./utils/crypto.js";
 import { writeAudit } from "./audit/auditLog.js";
 import { invalidateOrgAnalyticsCache } from "./services/analyticsEngine.js";
+import { invalidatePortfolioAnalyticsCache } from "./services/portfolioAnalytics.js";
 import { getActiveDataSourceIds, setDataSourceActive } from "./services/activeSource.js";
 import { checkActivationOverlap } from "./services/duplicateDetection.js";
 import { MAX_IMPORT_ROWS } from "./config/limits.js";
@@ -147,6 +148,7 @@ async function processImportPortfolio(job) {
       objectType: "portfolio_import", objectId: importId,
       after: { imported: result.imported, skipped: result.skipped },
     });
+    invalidatePortfolioAnalyticsCache(orgId); // next GET /api/portfolio/analytics recomputes from the new positions
     return result;
   } finally {
     clearStaging(stagingId);
