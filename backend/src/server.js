@@ -19,6 +19,7 @@ import decisionRecordsRoutes from "./routes/decisionRecords.routes.js";
 import simulationRoutes from "./routes/simulation.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
+import priceHistoryRoutes from "./routes/priceHistory.routes.js";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -76,6 +77,11 @@ app.use("/api/analytics", analyticsRoutes);
 // isn't a sales transaction; the import plumbing (staging/jobQueue/worker)
 // is reused as-is.
 app.use("/api/portfolio", portfolioRoutes);
+// Parte 2, FASE 3 — "Risco com histórico de preços": price_history table,
+// services/riskAnalytics.js and the optional services/marketData.js API,
+// all mounted under the same /api/portfolio prefix as its own router file
+// so portfolio.routes.js doesn't grow into a second, unrelated concern.
+app.use("/api/portfolio", priceHistoryRoutes);
 
 // --- FASE 3 / FASE 4: Decision Engine + Simulation Engine, both built on
 // top of the same computeAnalyticsForOrg() the routes above already use. -

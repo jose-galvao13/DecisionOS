@@ -405,3 +405,35 @@ CREATE TABLE IF NOT EXISTS security_prices (
 -- GET /holdings reads "the latest price per ticker" — DISTINCT ON (ticker)
 -- ordered by data DESC, created_at DESC; this index covers exactly that.
 CREATE INDEX IF NOT EXISTS idx_security_prices_org_ticker ON security_prices(org_id, ticker, data DESC, created_at DESC);
+
+-- Parte 2, FASE 3 — "Risco com histórico de preços". Unlike security_prices
+-- (only the latest quote per ticker, for valuing today's positions), this
+-- is a full daily time series per ticker — what services/riskAnalytics.js
+-- needs to compute returns/volatility/correlation/drawdown/VaR/beta.
+-- Deliberately its own table, not security_prices with more rows: the two
+-- have different write patterns (security_prices upserts "today's price";
+-- price_history bulk-loads years of history from an Excel upload or
+-- services/marketData.js) and different read patterns (one row vs. a full
+-- series), so keeping them separate avoids one query path having to filter
+-- the other's rows out. No FK to holdings/portfolio_imports — a ticker can
+-- have price history before (or without) ever being held, e.g. an index
+-- used only for beta (ponto 2: "Beta face a um índice carregado como
+-- série").
+CREATE TABLE IF NOT EXISTS price_history (
+  id          TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  ticker      TEXT NOT NULL,
+  data        DATE NOT NULL,
+  fecho       NUMERIC NOT NULL CHECK (fecho > 0),
+  -- 'upload' (Excel via /api/portfolio/price-history/commit), 'manual'
+  -- (one-off correction) or 'api' (services/marketData.js) — provenance,
+  -- same convention as security_prices.origem / holdings' outcome_source.
+  origem      TEXT NOT NULL DEFAULT 'upload' CHECK (origem IN ('upload','manual','api')),
+  created_by  TEXT REFERENCES users(id),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, ticker, data)
+);
+-- Every read (build a ticker's series for riskAnalytics.js) is "org +
+-- ticker, ordered by date" — this index covers exactly that, ascending
+-- since returns/drawdown/VaR are all computed oldest-to-newest.
+CREATE INDEX IF NOT EXISTS idx_price_history_org_ticker ON price_history(org_id, ticker, data ASC);

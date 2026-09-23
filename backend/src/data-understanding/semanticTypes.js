@@ -184,6 +184,20 @@ const DOMAIN_VOCAB = {
     // rows) — same shape as CHANNEL above.
     distribution: (p) => (p.primitiveType === "string" && p.uniqueRatio < 0.15 ? 0.75 : 0.2),
   },
+
+  // --- Parte 2, FASE 3 — histórico de preços (routes/priceHistory.routes.js,
+  // services/priceHistoryImport.js). TICKER and DATE above are reused as-is;
+  // this is the one column a holdings sheet never has (a closing price on
+  // a given day, not an average purchase price).
+  CLOSE_PRICE: {
+    category: "MEASURE",
+    synonyms: [
+      "fecho", "close", "closing price", "preco fecho", "preço fecho",
+      "preco de fecho", "preço de fecho", "adj close", "close price", "fechamento",
+    ],
+    expectedPrimitive: "numeric",
+    distribution: (p) => (p.primitiveType === "numeric" && p.stats?.allPositive ? 0.6 : 0.2),
+  },
 };
 
 // ---------------------------------------------------------------------

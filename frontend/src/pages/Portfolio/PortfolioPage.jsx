@@ -7,6 +7,7 @@ import { C, chartTooltip, barCursor } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { apiFetch, apiUpload, pollJob } from "../../api/client";
 import { Card, SectionTitle, EmptyState, JobProgress, KPI, Pill, useToast } from "../../components/ui";
+import RiskTab from "./RiskTab";
 
 // Mirrors DecisionOSApp.jsx's MANAGER_AND_ABOVE — kept as its own copy so
 // this page has no import-time dependency on the shell.
@@ -81,6 +82,10 @@ export default function PortfolioPage({ user }) {
 
   const [priceForm, setPriceForm] = useState({ ticker: "", preco: "", moeda: "EUR" });
   const [savingPrice, setSavingPrice] = useState(false);
+
+  // Parte 2, FASE 3 — "Risco" gets its own tab (RiskTab.jsx), with its own
+  // upload/API/GET-risk lifecycle entirely separate from holdings above.
+  const [tab, setTab] = useState("holdings");
 
   const loadHoldings = async () => {
     setLoading(true);
@@ -196,6 +201,27 @@ export default function PortfolioPage({ user }) {
     <div>
       <SectionTitle eyebrow={t("nav.portfolio")} title={t("nav.portfolio")} desc={t("portfolio.desc")} />
 
+      {/* Tabs — Parte 2, FASE 3 adds "Risco" next to the original holdings view. */}
+      <div className="flex gap-1 mt-2 mb-5 border-b" style={{ borderColor: C.greyBorderSoft }}>
+        {[
+          { id: "holdings", label: t("portfolio.tab.holdings") },
+          { id: "risk", label: t("portfolio.tab.risk") },
+        ].map((tb) => (
+          <button
+            key={tb.id}
+            onClick={() => setTab(tb.id)}
+            className="px-3 py-2 text-sm"
+            style={tab === tb.id ? { color: C.blue, borderBottom: `2px solid ${C.blue}`, fontWeight: 600 } : { color: C.textSecondary }}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "risk" ? (
+        <RiskTab canManage={canManage} />
+      ) : (
+      <>
       {canManage && (
         <Card className="p-4 mb-5">
           <input
@@ -434,6 +460,8 @@ export default function PortfolioPage({ user }) {
             </button>
           </div>
         </Card>
+      )}
+      </>
       )}
     </div>
   );

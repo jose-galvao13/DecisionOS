@@ -19,11 +19,13 @@ import { getStaging, clearStaging } from "./services/staging.js";
 import { assessQuality } from "./services/dataQuality.js";
 import { importRows } from "./services/unifiedModel.js";
 import { importHoldings } from "./services/portfolioImport.js";
+import { importPriceHistory } from "./services/priceHistoryImport.js";
 import * as pgConnector from "./services/pgConnector.js";
 import { decryptJSON } from "./utils/crypto.js";
 import { writeAudit } from "./audit/auditLog.js";
 import { invalidateOrgAnalyticsCache } from "./services/analyticsEngine.js";
 import { invalidatePortfolioAnalyticsCache } from "./services/portfolioAnalytics.js";
+import { invalidateRiskAnalyticsCache } from "./services/riskAnalytics.js";
 import { getActiveDataSourceIds, setDataSourceActive } from "./services/activeSource.js";
 import { checkActivationOverlap } from "./services/duplicateDetection.js";
 import { MAX_IMPORT_ROWS } from "./config/limits.js";
@@ -155,6 +157,36 @@ async function processImportPortfolio(job) {
   }
 }
 
+// Parte 2, FASE 3 — "histórico de preços": same staging + progress pattern
+// as processImportPortfolio, upserting into price_history instead of
+// (delete+reinsert) holdings — see services/priceHistoryImport.js's header
+// comment for why this one upserts rather than replaces.
+async function processImportPriceHistory(job) {
+  const { org_id: orgId } = job;
+  const { stagingId, mapping } = job.payload || {};
+  const staged = getStaging(stagingId, orgId);
+  if (!staged) throw new Error("staging expired or not found — re-upload the file");
+  try {
+    await updateJobProgress(job.id, { stage: "importing", progress: 20 });
+    const result = await importPriceHistory({
+      orgId, rows: staged.rows, mapping, createdBy: job.created_by,
+      onProgress: (imported, total) => {
+        const pct = 20 + Math.round((imported / Math.max(total, 1)) * 70); // importing spans 20%..90%
+        updateJobProgress(job.id, { stage: "importing", progress: Math.min(pct, 90) }).catch(() => {});
+      },
+    });
+    await writeAudit({
+      orgId, userId: job.created_by, action: "price_history.imported",
+      objectType: "price_history", objectId: null,
+      after: { imported: result.imported, skipped: result.skipped, tickers: result.tickers },
+    });
+    invalidateRiskAnalyticsCache(orgId); // next GET /api/portfolio/risk recomputes from the new series
+    return result;
+  } finally {
+    clearStaging(stagingId);
+  }
+}
+
 async function processImportOrRefreshPostgres(job, { isRefresh }) {
   const { org_id: orgId, data_source_id: dataSourceId } = job;
   const { rows: sourceRows } = await pool.query(`SELECT * FROM data_sources WHERE id = $1 AND org_id = $2`, [dataSourceId, orgId]);
@@ -186,6 +218,8 @@ async function processJob(job) {
       return processImportExcel(job);
     case "import_portfolio":
       return processImportPortfolio(job);
+    case "import_price_history":
+      return processImportPriceHistory(job);
     case "import_postgres":
       return processImportOrRefreshPostgres(job, { isRefresh: false });
     case "refresh_postgres":
