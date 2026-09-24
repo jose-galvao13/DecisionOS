@@ -25,7 +25,7 @@ const asNumber = (v) => {
   const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
   return Number.isFinite(n) ? Math.round(n) : 0;
 };
-function normalizeAdvice(raw) {
+function normalizeAdvice(raw, revenueEur) {
   const r = raw && typeof raw === "object" ? raw : {};
   const why = Array.isArray(r.why) ? r.why.map(asText).filter(Boolean) : asText(r.why).split(/\n|•/).map((s) => s.trim()).filter(Boolean);
   const advice = {
@@ -35,6 +35,15 @@ function normalizeAdvice(raw) {
     why,
     limitations: asText(r.limitations),
   };
+  // The prompt asks for thousands of euros (800 = €800K), but models sometimes
+  // answer in whole euros (800000). An "upside" larger than the entire revenue
+  // in the data can't be thousands, so rescale it instead of showing €800000K.
+  const capK = revenueEur > 0 ? revenueEur / 1000 : 100000;
+  if (advice.upsideHigh > capK || advice.upsideLow > capK) {
+    advice.upsideLow = Math.round(advice.upsideLow / 1000);
+    advice.upsideHigh = Math.round(advice.upsideHigh / 1000);
+  }
+  if (advice.upsideLow > advice.upsideHigh) [advice.upsideLow, advice.upsideHigh] = [advice.upsideHigh, advice.upsideLow];
   if (!advice.title) throw new Error("advisor answer has no title");
   return advice;
 }
@@ -60,7 +69,7 @@ function AIAdvisor({ analytics, sourceInfo, filters }) {
       const clean = text.replace(/```json|```/g, "").trim();
       // Llama sometimes adds a sentence before/after the JSON — keep only the {...} block.
       const result = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
-      setAdvice(normalizeAdvice(result));
+      setAdvice(normalizeAdvice(result, analytics?.totals?.revenue));
     } catch (e) {
       setErr(t("advisor.error"));
       toast.error(t("advisor.error"));
