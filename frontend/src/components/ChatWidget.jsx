@@ -6,11 +6,11 @@ import {
 } from "lucide-react";
 import { C } from "../lib/theme";
 import { useLang } from "../lib/i18n";
-import { apiFetch } from "../api/client";
+import { callClaudeWithTools, CHAT_SYSTEM } from "../api/aiClient";
 import { buildDigest } from "../lib/digest";
 
 /* ---------------------------------------------------------------
-   CHAT WIDGET — real Claude API calls, grounded in the digest
+   CHAT WIDGET — AI calls via the backend, grounded in the analytics tools
 ----------------------------------------------------------------*/
 function ChatWidget({ analytics, filters, sourceInfo }) {
   const { t, lang } = useLang();
@@ -35,8 +35,11 @@ function ChatWidget({ analytics, filters, sourceInfo }) {
       return;
     }
     try {
-      const digest = buildDigest(analytics, filters);
-      const answer = await callClaude(CHAT_SYSTEM[lang], `Question: ${q}\n\nDigest JSON:\n${JSON.stringify(digest)}`);
+      // CHAT_SYSTEM tells the model to call the analytics tools, so use the
+      // server-side tool loop (same as the Advisor). The active filters go
+      // after the question, as the prompt expects.
+      const scope = buildDigest(analytics, filters).activeFilters;
+      const answer = await callClaudeWithTools(CHAT_SYSTEM[lang], `Question: ${q}\n\nActive filters: ${JSON.stringify(scope)}`, { filters, maxRounds: 3 });
       setMessages((m) => [...m, { role: "ai", text: answer }]);
     } catch (e) {
       setMessages((m) => [...m, { role: "ai", text: t("chat.error") }]);
