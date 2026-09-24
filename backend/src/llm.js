@@ -1,18 +1,3 @@
-/* ---------------------------------------------------------------
-   LLM client — any OpenAI-compatible chat-completions API.
-
-   Replaces the old Anthropic-only call. Works with Groq (default,
-   free tier, Llama), OpenRouter, Cerebras, Together, or a local
-   Ollama, just by changing three env vars:
-
-     LLM_API_KEY   the provider's key            (or GROQ_API_KEY)
-     LLM_BASE_URL  default https://api.groq.com/openai/v1
-     LLM_MODEL     default llama-3.3-70b-versatile
-
-   analytics-tools.js keeps its Anthropic-style AI_TOOLS_SCHEMA
-   (name / description / input_schema); toOpenAITools() converts it
-   on the way out, so the tools and their tests are untouched.
-----------------------------------------------------------------*/
 
 const cfg = () => ({
   apiKey: process.env.LLM_API_KEY || process.env.GROQ_API_KEY || "",
