@@ -21,6 +21,8 @@
        of the freed capacity/demand).
 ----------------------------------------------------------------*/
 import { linregForecast } from "../analytics-tools.js";
+import { computeWeights, computeConcentration } from "./portfolioAnalytics.js";
+import { computePortfolioVaR95, MIN_OBSERVATIONS } from "./riskAnalytics.js";
 
 const DEFAULT_PRICE_ELASTICITY = 0.65;
 // Stated assumptions — the unified data model has no marketing-spend or
@@ -263,5 +265,178 @@ export function simulateDiscontinueProduct(analytics, productName) {
     risk: "low", // exact subtraction of real data, not a fitted estimate
     confidence: "high — this is a direct calculation from this product's actual figures, not a projection",
     evidence: { transactions: analytics.count, productShareOfRevenuePct: analytics.totals.revenue ? Number(((product.revenue / analytics.totals.revenue) * 100).toFixed(1)) : 0 },
+  };
+}
+
+/* ---------------------------------------------------------------
+   PORTFOLIO — "what if I sold X% of this position?" (Parte 2, FASE 4)
+----------------------------------------------------------------*/
+const r2 = (n) => Math.round(n * 100) / 100;
+const r4 = (n) => Math.round(n * 10000) / 10000;
+
+export const PORTFOLIO_DISCLAIMER =
+  "Analytical scenario about the risk profile of the portfolio. It does not recommend buying or selling anything and is not financial advice.";
+
+function concentrationBlock(weighted) {
+  const c = computeConcentration(weighted);
+  return {
+    hhi: r4(c.hhi),
+    effectiveN: r2(c.effectiveN),
+    top3: c.top3.map((p) => ({ ticker: p.ticker, nome: p.nome, pesoPct: r2(p.pesoPct) })),
+    top3Pct: r2(c.top3Pct),
+    largestPositionPct: c.top3.length ? r2(c.top3[0].pesoPct) : 0,
+  };
+}
+
+function varBlock(v, coveredValue) {
+  return {
+    pct: v.var95Pct == null ? null : r2(v.var95Pct),
+    amount: v.var95Pct == null ? null : r2((v.var95Pct / 100) * coveredValue),
+    insufficientData: v.insufficientData,
+    observations: v.observations,
+    coveredWeightPct: r2(v.coveredWeightPct),
+    coveredTickers: v.coveredTickers,
+    excludedTickers: v.excludedTickers,
+    from: v.from,
+    to: v.to,
+  };
+}
+
+/**
+ * What if `percent`% of the position in `ticker` were sold? Returns the
+ * weights, HHI (+ effective N, top 3) and historical VaR 95% BEFORE and
+ * AFTER, and the deltas — the same current -> scenario -> impact shape
+ * the other simulate* functions return.
+ *
+ * Pure: `portfolio` is buildPortfolioAnalytics()'s output (what
+ * GET /api/portfolio/analytics returns) and `seriesByTicker` the
+ * price_history closes ({ [ticker]: [{ data, fecho }] }) — see
+ * services/portfolioData.js for the loader. Never throws for bad input:
+ * like simulateDiscontinueProduct it returns { error } instead.
+ *
+ * Stated assumptions (also returned in `assumptions`):
+ *   - the proceeds LEAVE the analysed portfolio (not held as cash, not
+ *     reinvested): "after" describes the remaining holdings, i.e. what
+ *     the Carteira page would show if the position were reduced in the
+ *     imported file. Weights are re-based on the remaining value;
+ *   - sold at the current price, no fees or taxes;
+ *   - VaR uses the same historical method as the Risco tab, over the
+ *     portfolio's weighted daily returns with constant weights, on the
+ *     SAME sample window before and after, so the delta reflects the
+ *     weights and nothing else. Positions without enough price history
+ *     are left out of it (see var.coveredWeightPct) and currency moves
+ *     against the base currency are not modelled.
+ * Positions without a price/fx rate are outside every weight already
+ * (portfolioAnalytics.js) and stay outside here.
+ */
+export function simulateSellPosition({ ticker, percent, portfolio, seriesByTicker = {}, minObservations = MIN_OBSERVATIONS } = {}) {
+  const wanted = String(ticker ?? "").trim().toUpperCase();
+  const pct = Number(percent);
+  if (!wanted) return { error: "ticker is required" };
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return { error: "percent must be a number greater than 0 and at most 100" };
+  if (!portfolio || !Array.isArray(portfolio.positions) || !portfolio.positions.length) {
+    return { error: "no portfolio positions found — import a holdings file first" };
+  }
+
+  const target = portfolio.positions.find((p) => String(p.ticker).toUpperCase() === wanted);
+  if (!target) {
+    return { error: `unknown ticker "${wanted}" — valid tickers: ${portfolio.positions.map((p) => p.ticker).join(", ")}` };
+  }
+  if (target.semPreco) return { error: `${target.ticker} has no current price, so its weight in the portfolio is unknown — add a price first` };
+  if (target.semTaxaCambio) return { error: `${target.ticker} is priced in ${target.moeda}, which has no exchange rate to ${portfolio.defaultCurrency} — add one first` };
+
+  const sized = portfolio.positions
+    .filter((p) => p.valorAtualConvertido != null)
+    .map((p) => ({ ticker: p.ticker, nome: p.nome, moeda: p.moeda, valorAtualConvertido: p.valorAtualConvertido }));
+  const factor = 1 - pct / 100;
+  const afterSized = sized
+    .map((p) => (p.ticker === target.ticker ? { ...p, valorAtualConvertido: p.valorAtualConvertido * factor } : p))
+    .filter((p) => p.valorAtualConvertido > 1e-9);
+
+  const beforeW = computeWeights(sized);
+  const afterW = computeWeights(afterSized);
+  const valuesOf = (list) => Object.fromEntries(list.map((p) => [p.ticker, p.valorAtualConvertido]));
+  const totalOf = (list) => list.reduce((s, p) => s + p.valorAtualConvertido, 0);
+  const totalBefore = totalOf(sized);
+  const totalAfter = totalOf(afterSized);
+  const proceeds = target.valorAtualConvertido * (pct / 100);
+
+  const varBeforeRaw = computePortfolioVaR95(valuesOf(sized), seriesByTicker, { minObservations });
+  const varAfterRaw = varBeforeRaw.insufficientData || !afterSized.length
+    ? { ...varBeforeRaw, var95Pct: null, insufficientData: true, window: null }
+    : computePortfolioVaR95(valuesOf(afterSized), seriesByTicker, { minObservations, window: varBeforeRaw.window });
+  const coveredValue = (list, v) => list.filter((p) => v.coveredTickers.includes(p.ticker)).reduce((s, p) => s + p.valorAtualConvertido, 0);
+  const varBefore = varBlock(varBeforeRaw, coveredValue(sized, varBeforeRaw));
+  const varAfter = varBlock(varAfterRaw, coveredValue(afterSized, varAfterRaw));
+
+  const current = { totalValue: r2(totalBefore), positions: sized.length, ...concentrationBlock(beforeW), var95: varBefore };
+  const scenario = { totalValue: r2(totalAfter), positions: afterSized.length, ...concentrationBlock(afterW), var95: varAfter };
+
+  const weightBefore = beforeW.find((p) => p.ticker === target.ticker)?.pesoPct ?? 0;
+  const weightAfter = afterW.find((p) => p.ticker === target.ticker)?.pesoPct ?? 0;
+  const afterByTicker = Object.fromEntries(afterW.map((p) => [p.ticker, p]));
+  const weights = [...beforeW]
+    .sort((a, b) => b.pesoPct - a.pesoPct)
+    .map((p) => ({
+      ticker: p.ticker,
+      nome: p.nome,
+      pesoBeforePct: r2(p.pesoPct),
+      pesoAfterPct: r2(afterByTicker[p.ticker]?.pesoPct ?? 0),
+      valueBefore: r2(p.valorAtualConvertido),
+      valueAfter: r2(afterByTicker[p.ticker]?.valorAtualConvertido ?? 0),
+    }));
+
+  const bothVar = varBefore.pct != null && varAfter.pct != null;
+  const warnings = [];
+  const outside = portfolio.positions.filter((p) => p.valorAtualConvertido == null).map((p) => p.ticker);
+  if (outside.length) {
+    warnings.push({ code: "positions_outside", tickers: outside, message: `${outside.length} position(s) without a price or exchange rate are outside every weight and were not included.` });
+  }
+  if (sized.length === 1) {
+    warnings.push({ code: "single_position", message: "This is the only priced position, so it weighs 100% before and after a partial sale; weights and HHI cannot change unless all of it is sold." });
+  }
+  if (varBefore.insufficientData) {
+    warnings.push({ code: "var_insufficient_data", observations: varBefore.observations, minObservations, message: `Not enough price history to compute VaR (needs at least ${minObservations} daily returns common to the positions).` });
+  } else if (varBefore.coveredWeightPct < 99.9) {
+    warnings.push({ code: "var_partial_coverage", coveredWeightPct: varBefore.coveredWeightPct, tickers: varBefore.excludedTickers, message: `VaR covers ${varBefore.coveredWeightPct}% of the portfolio value; positions without enough price history are left out.` });
+  }
+  if (!varBefore.insufficientData) {
+    const foreign = sized.filter((p) => varBeforeRaw.coveredTickers.includes(p.ticker) && p.moeda !== portfolio.defaultCurrency).map((p) => p.ticker);
+    if (foreign.length) warnings.push({ code: "fx_not_modelled", tickers: foreign, message: `Returns of ${foreign.join(", ")} are in their own currency; currency moves against ${portfolio.defaultCurrency} are not modelled.` });
+  }
+
+  return {
+    label: `Sell ${pct}% of ${target.ticker}`,
+    ticker: target.ticker,
+    nome: target.nome,
+    percent: pct,
+    currency: portfolio.defaultCurrency,
+    proceeds: r2(proceeds),
+    current,
+    scenario,
+    weights,
+    impact: {
+      valueDelta: r2(totalAfter - totalBefore),
+      positionWeightDeltaPP: r2(weightAfter - weightBefore),
+      hhiDelta: r4(scenario.hhi - current.hhi),
+      effectiveNDelta: r2(scenario.effectiveN - current.effectiveN),
+      largestPositionDeltaPP: r2(scenario.largestPositionPct - current.largestPositionPct),
+      var95DeltaPP: bothVar ? r2(varAfter.pct - varBefore.pct) : null,
+      var95AmountDelta: bothVar ? r2(varAfter.amount - varBefore.amount) : null,
+    },
+    assumptions: {
+      proceeds: "removed_from_portfolio",
+      priceBasis: "current_price_no_fees_no_taxes",
+      varMethod: "historical_95_constant_weights_same_window",
+      notes: [
+        "The sale proceeds leave the analysed portfolio (they are neither held as cash nor reinvested): 'after' describes the remaining holdings, with weights re-based on their value.",
+        "The position is sold at its current price, with no fees or taxes.",
+        "VaR is the historical 95% VaR of the portfolio's weighted daily returns with constant weights, computed on the same sample window before and after so that the difference comes from the weights alone.",
+        "Positions without enough price history are left out of VaR and currency moves against the base currency are not modelled.",
+      ],
+    },
+    warnings,
+    evidence: { positions: sized.length, priceObservations: varBefore.observations, window: { from: varBefore.from, to: varBefore.to } },
+    disclaimer: PORTFOLIO_DISCLAIMER,
   };
 }

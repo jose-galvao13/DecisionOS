@@ -13,6 +13,7 @@
      - imports that failed                          (managers and above, last 7 days)
      - a poor data-quality report on the active file
      - red-severity findings from the Decision Engine
+     - a concentrated stock portfolio (one position above a limit, or a high HHI)
 
    The backend sends a stable `kind` + raw values (`params`), never a
    sentence: the wording is built in the browser from the language
@@ -23,6 +24,8 @@ import { ROLE_RANK } from "../auth/middleware.js";
 import { computeAnalyticsForOrg } from "./analyticsEngine.js";
 import { generateDecisions } from "./decisionEngine.js";
 import { getActiveDataSourceIds } from "./activeSource.js";
+import { loadPortfolioAnalytics } from "./portfolioData.js";
+import { PORTFOLIO_ALERT_MAX_POSITION_PCT, PORTFOLIO_ALERT_HHI } from "../config/limits.js";
 
 const RECENT_DECISION_DAYS = 14;
 const RECENT_IMPORT_FAILURE_DAYS = 7;
@@ -128,6 +131,42 @@ async function redFindings(orgId) {
     }));
 }
 
+// Parte 2, FASE 4 — concentração da carteira de ações. Reads the same cached
+// numbers as GET /api/portfolio/analytics (weights only over positions that
+// have a price and an fx rate, so an unpriced position can never trigger or
+// mask this). One notification at most: the largest position and the HHI
+// tell the whole story. Describes a risk — it never says what to do about it.
+const round1 = (n) => Math.round(n * 10) / 10;
+const round3 = (n) => Math.round(n * 1000) / 1000;
+
+async function portfolioConcentration(orgId) {
+  const { positions, concentration } = await loadPortfolioAnalytics(orgId);
+  const priced = (positions || []).filter((p) => p.pesoPct != null);
+  if (!priced.length) return [];
+
+  const top = priced.reduce((best, p) => (p.pesoPct > best.pesoPct ? p : best), priced[0]);
+  const reasons = [];
+  if (top.pesoPct > PORTFOLIO_ALERT_MAX_POSITION_PCT) reasons.push("position");
+  if (concentration.hhi > PORTFOLIO_ALERT_HHI) reasons.push("hhi");
+  if (!reasons.length) return [];
+
+  // Tied to the composition it was raised for, in 5-point steps of the top
+  // weight: market moves that shift the weight by a fraction don't re-notify
+  // someone who already read it, but a different top position (or one that
+  // grew a whole step) is a new notification.
+  const bucket = Math.floor(top.pesoPct / 5) * 5;
+  return [{
+    key: `portfolio_concentration:${top.ticker}:${bucket}`, kind: "portfolio_concentration",
+    severity: top.pesoPct >= 50 ? "red" : "yellow",
+    params: {
+      ticker: top.ticker, nome: top.nome || null, pesoPct: round1(top.pesoPct),
+      hhi: round3(concentration.hhi), effectiveN: round1(concentration.effectiveN), positions: priced.length,
+      reasons, maxPositionPct: PORTFOLIO_ALERT_MAX_POSITION_PCT, hhiLimit: PORTFOLIO_ALERT_HHI,
+    },
+    createdAt: null, target: { view: "portfolio" },
+  }];
+}
+
 /** Runs one source; a failure in it must never take the whole bell down. */
 async function safely(name, fn) {
   try { return await fn(); } catch (e) { console.error(`[notifications] ${name} failed:`, e.message); return []; }
@@ -144,6 +183,7 @@ export async function buildNotifications(user) {
     isManager ? safely("imports", () => importsFailed(orgId)) : [],
     safely("data quality", () => poorDataQuality(orgId)),
     safely("findings", () => redFindings(orgId)),
+    safely("portfolio", () => portfolioConcentration(orgId)),
   ]);
   const all = groups.flat();
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Bell, ClipboardCheck, CheckCircle2, XCircle, Target, FileWarning, ShieldAlert, AlertTriangle, Loader2, CheckCheck } from "lucide-react";
+import { Bell, ClipboardCheck, CheckCircle2, XCircle, Target, FileWarning, ShieldAlert, AlertTriangle, Loader2, CheckCheck, PieChart } from "lucide-react";
 import { C } from "../lib/theme";
 import { useLang } from "../lib/i18n";
 import { apiFetch } from "../api/client";
@@ -13,7 +13,7 @@ import { Popover } from "./ui";
    The list comes from GET /api/notifications (derived from live data on the
    server: decisions waiting for approval, your decisions approved/rejected,
    measured outcomes, failed imports, poor data quality, red findings from the
-   Decision Engine). Only "read" marks are stored, per person, on the server —
+   Decision Engine, a concentrated stock portfolio). Only "read" marks are stored, per person, on the server —
    so they follow the person across browsers.
 
    Refreshes when opened and once a minute while the tab is visible.
@@ -23,6 +23,7 @@ const POLL_MS = 60_000;
 const KIND_ICON = {
   approval_pending: ClipboardCheck, decision_approved: CheckCircle2, decision_rejected: XCircle,
   outcome_measured: Target, import_failed: FileWarning, low_quality: ShieldAlert, risk: AlertTriangle,
+  portfolio_concentration: PieChart,
 };
 const TONE = {
   red: { fg: C.red, bg: C.redSoft }, yellow: { fg: C.yellow, bg: C.yellowSoft },

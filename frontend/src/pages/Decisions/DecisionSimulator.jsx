@@ -5,6 +5,7 @@ import { useLang } from "../../lib/i18n";
 import { fmtK, fmtSigned } from "../../lib/format";
 import { apiFetch } from "../../api/client";
 import { Card, SectionTitle, SourceBadge, Tooltip, useToast } from "../../components/ui";
+import PortfolioSellTab from "./PortfolioSellTab";
 
 // P0 credibility fix: this page used to compute its own approximate
 // impact client-side, with its own copy of the elasticity constants and a
@@ -32,7 +33,10 @@ function LeverSourceTag({ source }) {
 
 const RISK_META = { low: C.green, medium: C.yellow, high: C.red };
 
-function DecisionSimulator({ sourceInfo, filters }) {
+// The original (sales) simulator, unchanged apart from the page header and the
+// source badge, which moved up into DecisionSimulator below now that the page
+// has two tabs.
+function BusinessSimulator({ filters }) {
   const { t, locale } = useLang();
   const toast = useToast();
   const [price, setPrice] = useState(5);
@@ -115,8 +119,6 @@ function DecisionSimulator({ sourceInfo, filters }) {
 
   return (
     <div>
-      <SectionTitle eyebrow="What happens if I do X?" title="Decision Simulator" desc={t("sim.desc")} />
-      <SourceBadge sourceInfo={sourceInfo} />
       <div className="grid grid-cols-3 gap-6">
         <Card className="p-6 col-span-1">
           <div className="text-sm font-semibold mb-4" style={{ color: C.charcoal }}>{t("sim.levers")}</div>
@@ -210,6 +212,50 @@ function DecisionSimulator({ sourceInfo, filters }) {
           )}
         </Card>
       </div>
+    </div>
+  );
+}
+
+// Parte 2, FASE 4 — the page now has two tabs: the original sales what-ifs
+// ("Negócio") and the stock portfolio's "sell part of a position" scenario
+// ("Carteira de ações", PortfolioSellTab.jsx). `businessDataMissing` is set by
+// the shell when there are no sales analytics (e.g. an organisation that only
+// uses the portfolio): the portfolio tab then opens first, since the business
+// one would only show its "no transactions" error.
+function DecisionSimulator({ sourceInfo, filters, businessDataMissing = false }) {
+  const { t } = useLang();
+  const [tab, setTab] = useState(businessDataMissing ? "portfolio" : "business");
+  const tabs = [
+    { id: "business", label: t("sim.tab.business") },
+    { id: "portfolio", label: t("sim.tab.portfolio") },
+  ];
+
+  return (
+    <div>
+      <SectionTitle eyebrow="What happens if I do X?" title="Decision Simulator" desc={tab === "portfolio" ? t("sim.portfolio.desc") : t("sim.desc")} />
+      <div role="tablist" aria-label={t("sim.tabs.label")} className="flex gap-1 mt-2 mb-5 border-b" style={{ borderColor: C.greyBorderSoft }}>
+        {tabs.map((tb) => (
+          <button
+            key={tb.id}
+            role="tab"
+            aria-selected={tab === tb.id}
+            onClick={() => setTab(tb.id)}
+            className="px-3 py-2 text-sm"
+            style={tab === tb.id ? { color: C.blue, borderBottom: `2px solid ${C.blue}`, fontWeight: 600 } : { color: C.textSecondary }}
+          >
+            {tb.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "portfolio" ? (
+        <PortfolioSellTab />
+      ) : (
+        <>
+          <SourceBadge sourceInfo={sourceInfo} />
+          <BusinessSimulator filters={filters} />
+        </>
+      )}
     </div>
   );
 }

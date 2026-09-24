@@ -381,6 +381,12 @@ function DecisionOSApp({ user, onLogout }) {
     // the sales unified model — it must render even in demo mode or while
     // sales analytics are loading/erroring, same reasoning as "account" above.
     if (view === "portfolio") return <PortfolioPage user={user} />;
+    // The Decision Simulator's "Carteira de ações" tab reads the portfolio, not
+    // the sales analytics, so without sales data (none yet, or failed to load)
+    // the page still opens — on that tab — instead of the empty/error state.
+    if (view === "sim" && !analytics && !(isBackendMode && analyticsLoading)) {
+      return <DecisionSimulator filters={filters} sourceInfo={sourceInfo} businessDataMissing />;
+    }
     if (isBackendMode && analyticsLoading && !analytics) {
       return (
         <div className="flex flex-col items-center justify-center py-24 text-center">

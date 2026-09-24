@@ -3,13 +3,14 @@ import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import { AI_TOOLS_SCHEMA, runTool } from "./analytics-tools.js";
+import { AI_TOOLS_SCHEMA, runTool, isPortfolioTool, PORTFOLIO_ADVISOR_GUARDRAILS } from "./analytics-tools.js";
 import { migrate } from "./db/migrate.js";
 import { loadSessionState } from "./services/userAdmin.js";
 import { startWorker } from "./worker.js";
 import { startMeasurementLoop } from "./services/measurementEngine.js";
 import { requireAuth } from "./auth/middleware.js";
 import { computeAnalyticsForOrg } from "./services/analyticsEngine.js";
+import { loadPortfolioContext } from "./services/portfolioData.js";
 import authRoutes from "./routes/auth.routes.js";
 import organizationsRoutes from "./routes/organizations.routes.js";
 import datasourcesRoutes from "./routes/datasources.routes.js";
@@ -140,9 +141,21 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
   }
 
   const analytics = await computeAnalyticsForOrg(req.user.orgId, filters || {});
+  // Parte 2, FASE 4: an org with a stock portfolio but no sales data can
+  // still use the portfolio tools, so "no transactions" is only a 404 when
+  // there is no portfolio either. Otherwise the portfolio is loaded lazily,
+  // the first time Claude calls one of the portfolio tools.
+  let portfolio = null;
   if (!analytics) {
-    return res.status(404).json({ error: "no transactions found for this organization yet — connect or upload a data source first" });
+    portfolio = await loadPortfolioContext(req.user.orgId);
+    if (!portfolio.analytics.positions.length) {
+      return res.status(404).json({ error: "no transactions found for this organization yet — connect or upload a data source first" });
+    }
   }
+  // Appended here, not left to the client's prompt, so the portfolio rules
+  // (describe risk and scenarios, never recommend buying/selling, add the
+  // not-financial-advice notice) can't be dropped by whoever calls this.
+  const systemPrompt = `${system}\n\n${PORTFOLIO_ADVISOR_GUARDRAILS}`;
 
   try {
     let messages = [{ role: "user", content: userText }];
@@ -150,7 +163,7 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
       const data = await callAnthropic({
         model: MODEL,
         max_tokens: 1200,
-        system,
+        system: systemPrompt,
         tools: AI_TOOLS_SCHEMA,
         messages,
       });
@@ -168,10 +181,13 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
       }
 
       messages = [...messages, { role: "assistant", content }];
+      if (!portfolio && toolUses.some((tu) => isPortfolioTool(tu.name))) {
+        portfolio = await loadPortfolioContext(req.user.orgId);
+      }
       const toolResults = toolUses.map((tu) => ({
         type: "tool_result",
         tool_use_id: tu.id,
-        content: JSON.stringify(runTool(tu.name, tu.input, { analytics })),
+        content: JSON.stringify(runTool(tu.name, tu.input, { analytics, portfolio })),
       }));
       messages = [...messages, { role: "user", content: toolResults }];
     }

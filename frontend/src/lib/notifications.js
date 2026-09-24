@@ -1,4 +1,5 @@
 import { fmtK } from "./format";
+import { portfolioConcentrationCopy } from "./alertCopy";
 
 const RISK_TYPES = ["revenue_decline", "margin_deterioration", "customer_risk", "product_profitability", "cost_leakage", "sales_anomaly", "forecast_deviation"];
 
@@ -38,6 +39,11 @@ export function describeNotification(n, t, locale) {
         title: t(`notif.risk.${RISK_TYPES.includes(p.type) ? p.type : "default"}`),
         body: impact ? t("notif.risk.bodyImpact", { impact }) : t("notif.risk.body"),
       };
+    }
+    case "portfolio_concentration": {
+      // Wording lives in alertCopy.js next to the other alert copy.
+      const { title, line } = portfolioConcentrationCopy(p, t, locale);
+      return { title, body: line };
     }
     default:
       return { title: n.kind, body: "" };

@@ -21,9 +21,8 @@ import { parseDate } from "../utils/parse.js";
 import { writeAudit } from "../audit/auditLog.js";
 import { enqueueJob } from "../services/jobQueue.js";
 import { MAX_IMPORT_ROWS } from "../config/limits.js";
-import { getCached, setCached } from "../services/cache.js";
-import { buildRateIndex } from "../services/fxRates.js";
-import { buildPortfolioAnalytics, invalidatePortfolioAnalyticsCache } from "../services/portfolioAnalytics.js";
+import { invalidatePortfolioAnalyticsCache } from "../services/portfolioAnalytics.js";
+import { loadAggregatedHoldings, loadPortfolioAnalytics } from "../services/portfolioData.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -182,64 +181,10 @@ router.get("/imports", async (req, res) => {
   res.json({ imports: rows });
 });
 
-/** Shared loader for both GET /holdings and GET /analytics: positions
- *  summed by ticker across every import this org has (ponto 6: "todas as
- *  posições de todos os ficheiros somam-se por ticker" — there is no
- *  concept of "which file a holding belongs to" once it's in the total),
- *  each joined to its latest known price (DISTINCT ON, newest first).
- *  preco_medio is the quantity-weighted average across every lot. */
-async function loadAggregatedHoldings(orgId) {
-  const { rows } = await pool.query(
-    `SELECT h.ticker,
-            SUM(h.quantidade)                                AS quantidade,
-            SUM(h.quantidade * h.preco_medio) / SUM(h.quantidade) AS preco_medio,
-            (ARRAY_AGG(h.moeda ORDER BY h.created_at DESC))[1]      AS moeda,
-            (ARRAY_AGG(h.nome ORDER BY h.created_at DESC))[1]       AS nome,
-            (ARRAY_AGG(h.sector ORDER BY h.created_at DESC))[1]     AS sector,
-            (ARRAY_AGG(h.pais ORDER BY h.created_at DESC))[1]       AS pais,
-            (ARRAY_AGG(h.tipo_ativo ORDER BY h.created_at DESC))[1] AS tipo_ativo,
-            COUNT(DISTINCT h.import_id)                      AS file_count
-       FROM holdings h
-      WHERE h.org_id = $1
-      GROUP BY h.ticker
-      ORDER BY h.ticker`,
-    [orgId]
-  );
-
-  const tickers = rows.map((r) => r.ticker);
-  let latestByTicker = {};
-  if (tickers.length) {
-    const { rows: priceRows } = await pool.query(
-      `SELECT DISTINCT ON (ticker) ticker, preco, moeda, data, origem
-         FROM security_prices
-        WHERE org_id = $1 AND ticker = ANY($2)
-        ORDER BY ticker, data DESC, created_at DESC`,
-      [orgId, tickers]
-    );
-    latestByTicker = Object.fromEntries(priceRows.map((p) => [p.ticker, p]));
-  }
-
-  return rows.map((r) => {
-    const quantidade = Number(r.quantidade);
-    const precoMedio = Number(r.preco_medio);
-    const latest = latestByTicker[r.ticker];
-    const precoAtual = latest ? Number(latest.preco) : null;
-    return {
-      ticker: r.ticker,
-      nome: r.nome,
-      sector: r.sector,
-      pais: r.pais,
-      tipoAtivo: r.tipo_ativo,
-      quantidade,
-      precoMedio,
-      moeda: r.moeda,
-      precoAtual,
-      fileCount: Number(r.file_count),
-      lastPriceDate: latest?.data || null,
-      lastPriceSource: latest?.origem || null,
-    };
-  });
-}
+// The aggregated-positions loader (and the cached analytics built from it)
+// now live in services/portfolioData.js — Parte 2, FASE 4 has three more
+// readers of the same numbers (notifications, the simulator, the AI
+// Advisor), so they share one loader instead of each re-deriving it.
 
 router.get("/holdings", async (req, res) => {
   const positions = await loadAggregatedHoldings(req.user.orgId);
@@ -288,22 +233,7 @@ router.get("/holdings", async (req, res) => {
 // update or a completed import invalidates it explicitly (see PUT
 // /prices, DELETE /:id and worker.js) rather than waiting out the TTL.
 router.get("/analytics", async (req, res) => {
-  const orgId = req.user.orgId;
-  const cacheKey = `portfolio-analytics:${orgId}`;
-  const cached = getCached(cacheKey);
-  if (cached !== undefined) return res.json(cached);
-
-  const [positions, orgResult, rateResult] = await Promise.all([
-    loadAggregatedHoldings(orgId),
-    pool.query(`SELECT default_currency FROM organizations WHERE id = $1`, [orgId]),
-    pool.query(`SELECT currency, rate_to_default, effective_date FROM fx_rates WHERE org_id = $1`, [orgId]),
-  ]);
-  const defaultCurrency = orgResult.rows[0]?.default_currency || "EUR";
-  const rateIndex = buildRateIndex(rateResult.rows);
-
-  const analytics = buildPortfolioAnalytics(positions, { defaultCurrency, rateIndex });
-  setCached(cacheKey, analytics, 60_000);
-  res.json(analytics);
+  res.json(await loadPortfolioAnalytics(req.user.orgId));
 });
 
 // Manual price entry (origem 'manual') for one ticker/day. Upserts on

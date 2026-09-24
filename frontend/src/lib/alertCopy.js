@@ -15,3 +15,22 @@ export function alertCopy(a, t, locale) {
     default: return { title: t("alerts.customerRisk"), line: t("alerts.customerRiskLine", { n: a.n }) };
   }
 }
+
+/** Copy for the portfolio concentration notification (backend kind
+ *  "portfolio_concentration", see services/notifications.js — Parte 2,
+ *  FASE 4). `p` is the notification's raw `params`: the ticker and weight of
+ *  the largest position, the HHI, the effective number of positions and
+ *  which of the two limits (position weight / HHI) was crossed. Same
+ *  { title, line } shape as alertCopy(); notifications.js uses `line` as the
+ *  notification body. It describes the concentration and where to look at
+ *  it — never what to do about it. */
+export function portfolioConcentrationCopy(p, t, locale = "pt-PT") {
+  const num = (v, digits) => Number(v).toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const reasons = p.reasons || [];
+  const vars = { ticker: p.ticker, pct: num(p.pesoPct, 1), limit: num(p.maxPositionPct ?? 25, 0), hhi: num(p.hhi, 2), n: num(p.effectiveN, 1) };
+  const key = reasons.includes("position") && reasons.includes("hhi") ? "Both" : reasons.includes("hhi") ? "Hhi" : "Position";
+  return {
+    title: t("alerts.portfolioConcentration"),
+    line: `${t(`alerts.portfolioConcentration${key}`, vars)} ${t("alerts.portfolioConcentrationHint")}`,
+  };
+}

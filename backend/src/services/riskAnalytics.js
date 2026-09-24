@@ -159,6 +159,78 @@ function alignByDate(mapA, mapB) {
 }
 
 /**
+ * FASE 4 — historical VaR 95% of a WEIGHTED portfolio (what the Decision
+ * Simulator's "vender posição" tab compares before/after).
+ *
+ * Same method as historicalVaR95() above, applied to the portfolio's own
+ * daily return series: on each date the portfolio return is
+ * Σ weight_i × return_i (weights held constant — a constant-mix
+ * approximation, no intra-window rebalancing model), then the 5th
+ * percentile of that series. Empirical, not parametric.
+ *
+ * Honest about what it can't cover:
+ *   - a ticker with fewer than `minObservations` daily returns is left
+ *     OUT (never padded/guessed) and the remaining weights are
+ *     renormalised over the covered ones; `coveredWeightPct` tells the
+ *     caller how much of the portfolio the number actually describes;
+ *   - only dates on which EVERY covered ticker has a return are used
+ *     (a shorter window beats mixing tickers over different days);
+ *   - returns are in each ticker's own price currency — currency moves
+ *     against the portfolio's base currency are not modelled.
+ *
+ * @param weights  { [ticker]: weight }, any positive scale (renormalised)
+ * @param window   optional `result.window` of a previous call. Forces the
+ *   SAME tickers and dates, so a before/after pair differs only by the
+ *   weights and never by a moving sample window.
+ * @returns { var95Pct, insufficientData, observations, coveredWeightPct,
+ *            coveredTickers, excludedTickers, from, to, window }
+ *   var95Pct is null (and insufficientData true) when nothing is covered
+ *   or the common window is under minObservations.
+ */
+export function computePortfolioVaR95(weights, seriesByTicker, { minObservations = MIN_OBSERVATIONS, window = null } = {}) {
+  const held = Object.keys(weights).filter((t) => weights[t] > 0);
+  const totalWeight = held.reduce((s, t) => s + weights[t], 0);
+
+  const returnMaps = {};
+  const covered = [];
+  const excluded = [];
+  for (const t of held) {
+    if (window && !window.tickers.includes(t)) { excluded.push(t); continue; }
+    const rets = computeDailyReturns(seriesByTicker[t] || []);
+    if (!window && rets.length < minObservations) { excluded.push(t); continue; }
+    returnMaps[t] = new Map(rets.map((r) => [r.data, r.ret]));
+    covered.push(t);
+  }
+
+  const coveredWeight = covered.reduce((s, t) => s + weights[t], 0);
+  const coveredWeightPct = totalWeight > 0 ? (coveredWeight / totalWeight) * 100 : 0;
+  const empty = (observations = 0) => ({
+    var95Pct: null, insufficientData: true, observations, coveredWeightPct,
+    coveredTickers: covered, excludedTickers: excluded, from: null, to: null, window: null,
+  });
+  if (!covered.length || coveredWeight <= 0) return empty();
+
+  let dates = window
+    ? window.dates
+    : [...returnMaps[covered[0]].keys()].filter((d) => covered.every((t) => returnMaps[t].has(d))).sort();
+  if (window) dates = dates.filter((d) => covered.every((t) => returnMaps[t].has(d)));
+  if (dates.length < minObservations) return empty(dates.length);
+
+  const portfolioReturns = dates.map((d) => covered.reduce((s, t) => s + (weights[t] / coveredWeight) * returnMaps[t].get(d), 0));
+  return {
+    var95Pct: historicalVaR95(portfolioReturns) * 100,
+    insufficientData: false,
+    observations: dates.length,
+    coveredWeightPct,
+    coveredTickers: covered,
+    excludedTickers: excluded,
+    from: dates[0],
+    to: dates[dates.length - 1],
+    window: { tickers: covered, dates },
+  };
+}
+
+/**
  * Full pipeline for the "Risco" tab: raw price series per ticker ->
  * per-ticker volatility/drawdown/VaR/beta + a correlation matrix across
  * every ticker pair.
