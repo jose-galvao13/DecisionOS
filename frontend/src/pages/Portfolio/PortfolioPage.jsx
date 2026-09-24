@@ -82,6 +82,8 @@ export default function PortfolioPage({ user }) {
 
   const [priceForm, setPriceForm] = useState({ ticker: "", preco: "", moeda: "EUR" });
   const [savingPrice, setSavingPrice] = useState(false);
+  const [uploadingPrices, setUploadingPrices] = useState(false);
+  const priceFileInput = useRef(null);
 
   // Parte 2, FASE 3 — "Risco" gets its own tab (RiskTab.jsx), with its own
   // upload/API/GET-risk lifecycle entirely separate from holdings above.
@@ -210,6 +212,34 @@ export default function PortfolioPage({ user }) {
       toast.error(e.message || t("portfolio.error.priceForm"));
     } finally {
       setSavingPrice(false);
+    }
+  };
+
+  // Bulk pricing: POST /api/portfolio/prices/upload takes a whole sheet of
+  // Ticker | Preço [| Moeda | Data] so a big portfolio isn't priced one
+  // ticker at a time. Valid rows are saved even if others are skipped.
+  const uploadPrices = async (file) => {
+    if (!file) return;
+    setUploadingPrices(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await apiUpload("/api/portfolio/prices/upload", fd);
+      toast.success(t("portfolio.prices.success", { n: res.imported }));
+      if (res.skipped > 0) {
+        const first = res.issues?.[0];
+        toast.error(t("portfolio.prices.skipped", { n: res.skipped, row: first?.row ?? "?", reason: first ? t(`portfolio.prices.reason.${first.reason}`) : "" }));
+      }
+      if (res.notHeld?.length) {
+        toast.error(t("portfolio.prices.notHeld", { n: res.notHeld.length, tickers: res.notHeld.slice(0, 5).join(", ") }));
+      }
+      await loadHoldings();
+      await loadAnalytics();
+    } catch (e) {
+      toast.error(e.message || t("portfolio.prices.error"));
+    } finally {
+      setUploadingPrices(false);
+      if (priceFileInput.current) priceFileInput.current.value = "";
     }
   };
 
@@ -510,6 +540,19 @@ export default function PortfolioPage({ user }) {
               style={{ background: C.blue, color: "white" }}>
               {savingPrice ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} {t("portfolio.savePrice")}
             </button>
+          </div>
+          <div className="mt-4 pt-4 flex items-center gap-3 flex-wrap" style={{ borderTop: `1px solid ${C.greyBorderSoft}` }}>
+            <input
+              ref={priceFileInput} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+              aria-label={t("portfolio.prices.upload")}
+              onChange={(e) => uploadPrices(e.target.files?.[0])}
+            />
+            <button onClick={() => priceFileInput.current?.click()} disabled={uploadingPrices}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+              style={{ border: `1px solid ${C.blue}`, color: C.blue }}>
+              {uploadingPrices ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {t("portfolio.prices.upload")}
+            </button>
+            <span className="text-xs" style={{ color: C.textMuted }}>{t("portfolio.prices.hint")}</span>
           </div>
         </Card>
       )}

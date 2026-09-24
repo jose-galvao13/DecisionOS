@@ -12,11 +12,12 @@ import { Router } from "express";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import { randomUUID } from "crypto";
-import { pool } from "../db/pool.js";
+import { pool, withTransaction } from "../db/pool.js";
 import { requireAuth, requireMinRole } from "../auth/middleware.js";
 import { analyzeDataset } from "../data-understanding/index.js";
 import { putStaging, getStaging } from "../services/staging.js";
 import { validateRows } from "../services/portfolioImport.js";
+import { parsePriceRows } from "../services/securityPricesImport.js";
 import { parseDate } from "../utils/parse.js";
 import { writeAudit } from "../audit/auditLog.js";
 import { enqueueJob } from "../services/jobQueue.js";
@@ -266,6 +267,66 @@ router.put("/prices", requireMinRole("manager"), async (req, res) => {
   });
   invalidatePortfolioAnalyticsCache(req.user.orgId);
   res.json(rows[0]);
+});
+
+// Bulk price load (origem 'upload'): one spreadsheet of Ticker | Preço [| Moeda
+// | Data] instead of one PUT /prices per ticker — a portfolio with hundreds of
+// positions can't be priced by hand. Same upsert on (org, ticker, date) as the
+// manual entry, so re-uploading the day's file corrects it instead of piling up
+// rows. Rows that can't be used are skipped and reported (with their sheet row
+// number); the valid ones are still saved. Moeda is optional: it defaults to
+// the currency the ticker is already held in.
+router.post("/prices/upload", requireMinRole("manager"), upload.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "no file uploaded" });
+  let aoa;
+  try {
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    aoa = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: null });
+  } catch {
+    return res.status(400).json({ error: "could not read this file — is it a valid .xlsx/.xls/.csv?" });
+  }
+  if (aoa.length > MAX_IMPORT_ROWS + 1) return res.status(400).json({ error: `file has more than ${MAX_IMPORT_ROWS} rows` });
+
+  const { rows: held } = await pool.query(
+    `SELECT DISTINCT ON (ticker) ticker, moeda FROM holdings WHERE org_id = $1 ORDER BY ticker, created_at DESC`,
+    [req.user.orgId]
+  );
+  const parsed = parsePriceRows(aoa, { defaultCurrencyByTicker: Object.fromEntries(held.map((h) => [h.ticker, h.moeda])) });
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  if (!parsed.prices.length) {
+    return res.status(400).json({ error: "no valid price rows found", skipped: parsed.skipped, issues: parsed.issues });
+  }
+
+  const CHUNK = 500;
+  await withTransaction(async (client) => {
+    for (let i = 0; i < parsed.prices.length; i += CHUNK) {
+      const chunk = parsed.prices.slice(i, i + CHUNK);
+      const params = [];
+      const tuples = chunk.map((p, j) => {
+        params.push(randomUUID(), req.user.orgId, p.ticker, p.preco, p.moeda, p.data, req.user.id);
+        const b = j * 7;
+        return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}, COALESCE($${b + 6}::date, CURRENT_DATE), 'upload', $${b + 7})`;
+      });
+      await client.query(
+        `INSERT INTO security_prices (id, org_id, ticker, preco, moeda, data, origem, created_by)
+         VALUES ${tuples.join(",")}
+         ON CONFLICT (org_id, ticker, data)
+         DO UPDATE SET preco = EXCLUDED.preco, moeda = EXCLUDED.moeda, origem = 'upload',
+                       created_by = EXCLUDED.created_by, created_at = now()`,
+        params
+      );
+    }
+  });
+
+  const heldTickers = new Set(held.map((h) => h.ticker));
+  const notHeld = [...new Set(parsed.prices.map((p) => p.ticker))].filter((t) => !heldTickers.has(t));
+  await writeAudit({
+    orgId: req.user.orgId, userId: req.user.id, action: "portfolio.prices_uploaded",
+    objectType: "security_price", after: { imported: parsed.prices.length, skipped: parsed.skipped, file: req.file.originalname },
+  });
+  invalidatePortfolioAnalyticsCache(req.user.orgId);
+  res.json({ imported: parsed.prices.length, skipped: parsed.skipped, issues: parsed.issues, notHeld });
 });
 
 // Remove a portfolio import and its positions (holdings cascade via
