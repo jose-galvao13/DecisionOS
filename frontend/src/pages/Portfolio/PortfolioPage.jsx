@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, TrendingUp, TrendingDown, RefreshCw, Loader2, PiggyBank, AlertTriangle } from "lucide-react";
+import { Upload, TrendingUp, TrendingDown, RefreshCw, Loader2, PiggyBank, AlertTriangle, Trash2 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
@@ -87,6 +87,33 @@ export default function PortfolioPage({ user }) {
   // upload/API/GET-risk lifecycle entirely separate from holdings above.
   const [tab, setTab] = useState("holdings");
 
+  // Every upload is its own import and positions from all imports are summed
+  // by ticker, so re-uploading a file doubles it. This list is how a manager
+  // removes one (DELETE /api/portfolio/:id — positions cascade, prices stay).
+  const [imports, setImports] = useState([]);
+  const [deletingId, setDeletingId] = useState(null);
+  const loadImports = async () => {
+    try {
+      const data = await apiFetch("/api/portfolio/imports");
+      setImports(data.imports || []);
+    } catch {
+      /* the list is a convenience; the page works without it */
+    }
+  };
+  const deleteImport = async (imp) => {
+    if (!window.confirm(t("portfolio.imports.deleteConfirm", { name: imp.name, n: imp.row_count }))) return;
+    setDeletingId(imp.id);
+    try {
+      await apiFetch(`/api/portfolio/${imp.id}`, { method: "DELETE" });
+      toast.success(t("portfolio.imports.deleted"));
+      await Promise.all([loadImports(), loadHoldings(), loadAnalytics()]);
+    } catch (e) {
+      toast.error(e.message || t("portfolio.error.load"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const loadHoldings = async () => {
     setLoading(true);
     setError("");
@@ -114,7 +141,7 @@ export default function PortfolioPage({ user }) {
     }
   };
 
-  useEffect(() => { loadHoldings(); loadAnalytics(); }, []);
+  useEffect(() => { loadHoldings(); loadAnalytics(); loadImports(); }, []);
 
   const totalGainAbs = totals.valorAtual - totals.custoTotal;
   const totalGainPct = totals.custoTotal ? (totalGainAbs / totals.custoTotal) * 100 : 0;
@@ -155,6 +182,7 @@ export default function PortfolioPage({ user }) {
       setFileName("");
       await loadHoldings();
       await loadAnalytics();
+      await loadImports();
     } catch (e) {
       toast.error(e.message || t("portfolio.error.commit"));
     } finally {
@@ -433,6 +461,30 @@ export default function PortfolioPage({ user }) {
             </div>
           )}
         </>
+      )}
+
+      {canManage && imports.length > 0 && (
+        <Card className="p-4 mt-5">
+          <div className="text-sm font-semibold mb-3" style={{ color: C.charcoal }}>{t("portfolio.imports.title")}</div>
+          <div className="space-y-2">
+            {imports.map((imp) => (
+              <div key={imp.id} className="flex items-center justify-between gap-3 text-sm">
+                <div style={{ color: C.charcoal }}>
+                  {imp.name} <span style={{ color: C.textMuted }}>· {t("portfolio.imports.rows", { n: imp.row_count })} · {String(imp.created_at).slice(0, 10)}</span>
+                </div>
+                <button
+                  onClick={() => deleteImport(imp)}
+                  disabled={deletingId === imp.id}
+                  aria-label={`${t("portfolio.imports.delete")} ${imp.name}`}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs"
+                  style={{ border: `1px solid ${C.greyBorder}`, color: C.red }}
+                >
+                  {deletingId === imp.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} {t("portfolio.imports.delete")}
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       {canManage && (

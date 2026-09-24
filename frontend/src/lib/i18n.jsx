@@ -422,6 +422,11 @@ const STRINGS = {
     "portfolio.risk.fetchApi.error": "Não foi possível contactar o provedor de dados de mercado.",
     "portfolio.risk.deleteTicker": "Remover histórico",
     "portfolio.risk.deleteConfirm": "Remover todo o histórico de preços de {ticker}?",
+    "portfolio.imports.title": "Importações da carteira",
+    "portfolio.imports.rows": "{n} posições",
+    "portfolio.imports.delete": "Remover",
+    "portfolio.imports.deleteConfirm": "Remover a importação “{name}” e as suas {n} posições? Os preços já guardados mantêm-se.",
+    "portfolio.imports.deleted": "Importação removida.",
 
     // Parte 2, FASE 4 — Ligação ao resto (alerta, simulador, advisor).
     "alerts.portfolioConcentration": "Carteira concentrada",
@@ -874,6 +879,11 @@ const STRINGS = {
     "portfolio.risk.fetchApi.error": "Couldn't reach the market data provider.",
     "portfolio.risk.deleteTicker": "Remove history",
     "portfolio.risk.deleteConfirm": "Remove all price history for {ticker}?",
+    "portfolio.imports.title": "Portfolio imports",
+    "portfolio.imports.rows": "{n} positions",
+    "portfolio.imports.delete": "Remove",
+    "portfolio.imports.deleteConfirm": "Remove the import “{name}” and its {n} positions? Saved prices are kept.",
+    "portfolio.imports.deleted": "Import removed.",
 
     // Parte 2, FASE 4 — Hooking it up (alert, simulator, advisor).
     "alerts.portfolioConcentration": "Concentrated portfolio",
