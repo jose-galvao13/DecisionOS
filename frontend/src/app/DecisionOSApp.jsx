@@ -14,6 +14,7 @@ import { Card, useToast, EmptyState } from "../components/ui";
 import Onboarding from "../components/Onboarding";
 import FilterBar from "../components/FilterBar";
 import ChatWidget from "../components/ChatWidget";
+import PageErrorBoundary from "../components/PageErrorBoundary";
 import LangSwitch from "../components/LangSwitch";
 import ThemeSwitch from "../components/ThemeSwitch";
 import NotificationBell from "../components/NotificationBell";
@@ -480,7 +481,9 @@ function DecisionOSApp({ user, onLogout }) {
               </div>
             }
           >
-            <React.Fragment key={activeKey || "demo"}>{renderView()}</React.Fragment>
+            <PageErrorBoundary resetKey={`${view}:${activeKey || "demo"}`}>
+              <React.Fragment key={activeKey || "demo"}>{renderView()}</React.Fragment>
+            </PageErrorBoundary>
           </Suspense>
         </main>
       </div>

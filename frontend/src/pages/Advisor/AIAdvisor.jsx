@@ -7,6 +7,37 @@ import { buildDigest } from "../../lib/digest";
 import { callClaudeWithTools, ADVISOR_SYSTEM } from "../../api/aiClient";
 import { Card, Pill, SectionTitle, SourceBadge, useToast } from "../../components/ui";
 
+/* The model is asked for {title, upsideLow, upsideHigh, why[], limitations},
+   but not every model follows that to the letter (numbers as strings, `why`
+   as one string or as objects, ...). React crashes the whole page if it is
+   handed an object to render, so coerce everything to plain strings/numbers
+   here and reject answers with no usable title. */
+const asText = (v) => {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join(" ");
+  if (typeof v === "object") return Object.values(v).map(asText).filter(Boolean).join(" — ");
+  return "";
+};
+const asNumber = (v) => {
+  const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/[^\d.,-]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? Math.round(n) : 0;
+};
+function normalizeAdvice(raw) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const why = Array.isArray(r.why) ? r.why.map(asText).filter(Boolean) : asText(r.why).split(/\n|•/).map((s) => s.trim()).filter(Boolean);
+  const advice = {
+    title: asText(r.title),
+    upsideLow: asNumber(r.upsideLow),
+    upsideHigh: asNumber(r.upsideHigh),
+    why,
+    limitations: asText(r.limitations),
+  };
+  if (!advice.title) throw new Error("advisor answer has no title");
+  return advice;
+}
+
 function AIAdvisor({ analytics, sourceInfo, filters }) {
   const { t, lang, locale } = useLang();
   const toast = useToast();
@@ -28,7 +59,7 @@ function AIAdvisor({ analytics, sourceInfo, filters }) {
       const clean = text.replace(/```json|```/g, "").trim();
       // Llama sometimes adds a sentence before/after the JSON — keep only the {...} block.
       const result = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
-      setAdvice(result);
+      setAdvice(normalizeAdvice(result));
     } catch (e) {
       setErr(t("advisor.error"));
       toast.error(t("advisor.error"));
