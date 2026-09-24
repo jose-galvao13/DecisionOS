@@ -1,8 +1,25 @@
+/* ---------------------------------------------------------------
+   LLM client — any OpenAI-compatible chat-completions API.
+
+   Replaces the old Anthropic-only call. Works with Groq (default,
+   free tier), OpenRouter, Cerebras, Together, or a local
+   Ollama, just by changing three env vars:
+
+     LLM_API_KEY   the provider's key            (or GROQ_API_KEY)
+     LLM_BASE_URL  default https://api.groq.com/openai/v1
+     LLM_MODEL     default openai/gpt-oss-120b
+
+   analytics-tools.js keeps its Anthropic-style AI_TOOLS_SCHEMA
+   (name / description / input_schema); toOpenAITools() converts it
+   on the way out, so the tools and their tests are untouched.
+----------------------------------------------------------------*/
 
 const cfg = () => ({
   apiKey: process.env.LLM_API_KEY || process.env.GROQ_API_KEY || "",
   baseUrl: (process.env.LLM_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, ""),
-  model: process.env.LLM_MODEL || "llama-3.3-70b-versatile",
+  // Groq shut down llama-3.3-70b-versatile / llama-3.1-8b-instant on 2026-08-16
+  // (console.groq.com/docs/deprecations); gpt-oss-120b is its recommended replacement.
+  model: process.env.LLM_MODEL || "openai/gpt-oss-120b",
 });
 
 export const isLlmConfigured = () => Boolean(cfg().apiKey);
@@ -45,12 +62,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *  (a known Llama quirk) and once on a short rate-limit wait. */
 export async function chatCompletion({ system, messages, tools, maxTokens = 1000 }) {
   const { apiKey, baseUrl, model } = cfg();
+  // gpt-oss models "think" before answering and the thinking counts against
+  // max_tokens, so give them headroom and keep the reasoning short.
+  const isReasoning = /gpt-oss/i.test(model);
   const body = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: isReasoning ? maxTokens * 3 : maxTokens,
     temperature: 0.2,
     messages: [{ role: "system", content: system }, ...messages],
   };
+  if (isReasoning) body.reasoning_effort = process.env.LLM_REASONING_EFFORT || "low";
   if (tools?.length) {
     body.tools = toOpenAITools(tools);
     body.tool_choice = "auto";
@@ -78,7 +99,11 @@ export async function chatCompletion({ system, messages, tools, maxTokens = 1000
         continue;
       }
     }
-    throw new LlmError(`LLM API error ${res.status}: ${errText.slice(0, 500)}`, res.status);
+    let providerMsg = errText.slice(0, 200);
+    try { providerMsg = JSON.parse(errText)?.error?.message || providerMsg; } catch { /* not JSON */ }
+    const err = new LlmError(`LLM API error ${res.status}: ${errText.slice(0, 500)}`, res.status);
+    err.providerMessage = String(providerMsg).slice(0, 200);
+    throw err;
   }
   throw new LlmError("LLM API: retries exhausted", 502);
 }

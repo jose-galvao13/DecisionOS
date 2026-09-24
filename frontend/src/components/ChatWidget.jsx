@@ -42,7 +42,8 @@ function ChatWidget({ analytics, filters, sourceInfo }) {
       const answer = await callClaudeWithTools(CHAT_SYSTEM[lang], `Question: ${q}\n\nActive filters: ${JSON.stringify(scope)}`, { filters, maxRounds: 3 });
       setMessages((m) => [...m, { role: "ai", text: answer }]);
     } catch (e) {
-      setMessages((m) => [...m, { role: "ai", text: t("chat.error") }]);
+      console.error("[ChatWidget]", e);
+      setMessages((m) => [...m, { role: "ai", text: `${t("chat.error")} (${e?.message || "erro desconhecido"})` }]);
     } finally { setLoading(false); }
   };
 

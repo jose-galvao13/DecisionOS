@@ -46,7 +46,9 @@ describe("llm client", () => {
     expect(url).toBe("https://api.groq.com/openai/v1/chat/completions");
     expect(init.headers.Authorization).toBe("Bearer test-key");
     const body = JSON.parse(init.body);
-    expect(body.model).toBe("llama-3.3-70b-versatile");
+    expect(body.model).toBe("openai/gpt-oss-120b");
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.max_tokens).toBe(3000);
     expect(body.messages[0]).toEqual({ role: "system", content: "SYS" });
     expect(body.tools.length).toBe(AI_TOOLS_SCHEMA.length);
   });

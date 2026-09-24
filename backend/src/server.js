@@ -100,6 +100,15 @@ function llmErrorResponse(res, e, fallbackMsg) {
   if (e instanceof LlmError && e.status === 429) {
     return res.status(429).json({ error: "AI provider rate limit reached — wait a few seconds and try again" });
   }
+  if (e instanceof LlmError) {
+    const hint = e.status === 401 || e.status === 403 ? " — check LLM_API_KEY on the server" : "";
+    return res.status(502).json({ error: `AI provider error (${e.status}): ${e.providerMessage || "no details"}${hint}` });
+  }
+  if (e instanceof LlmError) {
+    // Show the provider's status/reason (e.g. 401 bad key, 404 model shut down)
+    // instead of a blank 500 — it never contains our key.
+    return res.status(502).json({ error: `AI provider error: ${e.message.replace(/^LLM API error /, "")}`.slice(0, 300) });
+  }
   return res.status(500).json({ error: fallbackMsg });
 }
 
