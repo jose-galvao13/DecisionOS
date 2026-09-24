@@ -4,6 +4,7 @@ import { C } from "../../lib/theme";
 import { useLang } from "../../lib/i18n";
 import { fmtK } from "../../lib/format";
 import { buildDigest } from "../../lib/digest";
+import { computeEvidenceQuality } from "../../lib/metrics";
 import { callClaudeWithTools, ADVISOR_SYSTEM } from "../../api/aiClient";
 import { Card, Pill, SectionTitle, SourceBadge, useToast } from "../../components/ui";
 
