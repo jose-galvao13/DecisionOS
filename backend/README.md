@@ -438,7 +438,7 @@ npm start
 ```
 
 Required env vars (see `.env.example` for the full list with comments):
-- `ANTHROPIC_API_KEY` — for `/api/advisor` and `/api/chat`.
+- `LLM_API_KEY` — for `/api/advisor` and `/api/chat`. Any OpenAI-compatible provider; defaults to Groq (free, Llama). Optional: `LLM_BASE_URL`, `LLM_MODEL`.
 - `DATABASE_URL` — this app's own Postgres (not a customer's connected DB).
 - `CONFIG_ENCRYPTION_KEY` — 32-byte hex key that encrypts stored connector
   credentials. Generate with

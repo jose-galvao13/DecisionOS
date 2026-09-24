@@ -73,9 +73,9 @@ async function main() {
     process.env.JWT_SECRET = process.env.JWT_SECRET || randomBytes(48).toString("hex");
     process.env.CONFIG_ENCRYPTION_KEY = process.env.CONFIG_ENCRYPTION_KEY || randomBytes(32).toString("hex");
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.LLM_API_KEY) {
     console.warn(
-      "[decisionos-desktop] no Anthropic API key configured yet — AI Advisor will be unavailable " +
+      "[decisionos-desktop] no AI API key (LLM_API_KEY) configured yet — AI Advisor will be unavailable " +
         "until one is added in Settings."
     );
   }

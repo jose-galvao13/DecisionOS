@@ -138,7 +138,7 @@ fn main() {
                 ])
                 .env("JWT_SECRET", jwt_secret)
                 .env("CONFIG_ENCRYPTION_KEY", config_key)
-                .env("ANTHROPIC_API_KEY", anthropic_key);
+                .env("LLM_API_KEY", anthropic_key);
 
             let (mut rx, child) = sidecar.spawn().expect("failed to spawn backend sidecar");
             *app_handle.state::<SidecarState>().0.lock().unwrap() = Some(child);

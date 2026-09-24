@@ -9,7 +9,7 @@ live stack, unlike the vitest suite (which mocks the DB).
 ## Running it locally
 
 1. Start Postgres and the backend (see `backend/README.md` / `.env.example`).
-   Make sure `ANTHROPIC_API_KEY` is set — the "Ask Advisor" step is a real
+   Make sure `LLM_API_KEY` is set — the "Ask Advisor" step is a real
    call to the Advisor endpoint, which calls the Anthropic API.
 2. Start the frontend dev server: `npm run dev` (defaults to
    `http://localhost:5173`, matching `playwright.config.js`).

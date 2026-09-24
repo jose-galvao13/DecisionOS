@@ -4,7 +4,7 @@ import crypto from "crypto";
 // Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 // This is what protects PostgreSQL/MySQL/SQL Server passwords stored in
 // data_sources.connection_config — never store connector credentials
-// unencrypted, and never reuse ANTHROPIC_API_KEY or JWT_SECRET for this.
+// unencrypted, and never reuse LLM_API_KEY or JWT_SECRET for this.
 function getKey() {
   const hex = process.env.CONFIG_ENCRYPTION_KEY;
   if (!hex || hex.length !== 64) {

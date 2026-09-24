@@ -9,6 +9,7 @@ import { loadSessionState } from "./services/userAdmin.js";
 import { startWorker } from "./worker.js";
 import { startMeasurementLoop } from "./services/measurementEngine.js";
 import { requireAuth } from "./auth/middleware.js";
+import { chatCompletion, isLlmConfigured, parseToolArgs, LlmError } from "./llm.js";
 import { computeAnalyticsForOrg } from "./services/analyticsEngine.js";
 import { loadPortfolioContext } from "./services/portfolioData.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -22,13 +23,11 @@ import notificationsRoutes from "./routes/notifications.routes.js";
 import portfolioRoutes from "./routes/portfolio.routes.js";
 import priceHistoryRoutes from "./routes/priceHistory.routes.js";
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 const PORT = process.env.PORT || 8787;
 
-if (!ANTHROPIC_API_KEY) {
+if (!isLlmConfigured()) {
   console.warn(
-    "[decisionos-backend] ANTHROPIC_API_KEY is not set. /api/advisor and /api/chat will return 500s until it's configured (see .env.example)."
+    "[decisionos-backend] LLM_API_KEY is not set. /api/advisor and /api/chat will return 500s until it's configured (see .env.example)."
   );
 }
 
@@ -52,7 +51,7 @@ app.use(
   })
 );
 
-// --- Basic rate limiting: protects the Anthropic bill, not a substitute
+// --- Basic rate limiting: protects the LLM quota/bill, not a substitute
 // for real per-tenant quotas. Now that auth/orgs exist (FASE 1), this could
 // be keyed by req.user.orgId instead of just IP — left as IP-based for now
 // since /api/auth/* has to work before a user has a token.
@@ -96,30 +95,21 @@ app.use("/api/decision-log", decisionRecordsRoutes);
 app.use("/api/simulate", simulationRoutes);
 app.use("/api/notifications", notificationsRoutes);
 
-async function callAnthropic(body) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Anthropic API error ${res.status}: ${errText}`);
+// Friendly HTTP status for provider errors (free tiers hit rate limits a lot).
+function llmErrorResponse(res, e, fallbackMsg) {
+  if (e instanceof LlmError && e.status === 429) {
+    return res.status(429).json({ error: "AI provider rate limit reached — wait a few seconds and try again" });
   }
-  return res.json();
+  return res.status(500).json({ error: fallbackMsg });
 }
 
 /* ---------------------------------------------------------------
    POST /api/advisor
    Body: { system: string, userText: string, filters?: object, maxRounds?: number }
-   Runs the full tool-calling loop server-side: Claude decides which
+   Runs the full tool-calling loop server-side: the model decides which
    analytics tool(s) it needs, we execute them here, feed results back,
    repeat until Claude answers in plain text. The frontend never talks to
-   Anthropic directly and never runs a tool itself.
+   the LLM provider directly and never runs a tool itself.
 
    FASE 2 change (closes roadmap 🔴 #2 — "tirar os dados de confiança do
    browser"): `analytics` is no longer accepted from the request body at
@@ -136,8 +126,8 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
   if (!system || !userText) {
     return res.status(400).json({ error: "system and userText are required" });
   }
-  if (!ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: "server is not configured with an Anthropic API key" });
+  if (!isLlmConfigured()) {
+    return res.status(500).json({ error: "server is not configured with an LLM API key (LLM_API_KEY)" });
   }
 
   const analytics = await computeAnalyticsForOrg(req.user.orgId, filters || {});
@@ -160,41 +150,35 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
   try {
     let messages = [{ role: "user", content: userText }];
     for (let round = 0; round < maxRounds; round++) {
-      const data = await callAnthropic({
-        model: MODEL,
-        max_tokens: 1200,
+      const msg = await chatCompletion({
         system: systemPrompt,
-        tools: AI_TOOLS_SCHEMA,
         messages,
+        tools: AI_TOOLS_SCHEMA,
+        maxTokens: 1200,
       });
-      const content = data.content || [];
-      const toolUses = content.filter((b) => b.type === "tool_use");
+      const toolCalls = msg.tool_calls || [];
 
-      if (!toolUses.length) {
-        const text = content
-          .filter((b) => b.type === "text")
-          .map((b) => b.text || "")
-          .join("\n")
-          .trim();
+      if (!toolCalls.length) {
+        const text = (msg.content || "").trim();
         if (!text) return res.status(502).json({ error: "empty response from model" });
         return res.json({ text });
       }
 
-      messages = [...messages, { role: "assistant", content }];
-      if (!portfolio && toolUses.some((tu) => isPortfolioTool(tu.name))) {
+      messages = [...messages, { role: "assistant", content: msg.content || "", tool_calls: toolCalls }];
+      if (!portfolio && toolCalls.some((tc) => isPortfolioTool(tc.function?.name))) {
         portfolio = await loadPortfolioContext(req.user.orgId);
       }
-      const toolResults = toolUses.map((tu) => ({
-        type: "tool_result",
-        tool_use_id: tu.id,
-        content: JSON.stringify(runTool(tu.name, tu.input, { analytics, portfolio })),
+      const toolResults = toolCalls.map((tc) => ({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(runTool(tc.function?.name, parseToolArgs(tc.function?.arguments), { analytics, portfolio })),
       }));
-      messages = [...messages, { role: "user", content: toolResults }];
+      messages = [...messages, ...toolResults];
     }
     return res.status(504).json({ error: "tool-call round limit reached" });
   } catch (e) {
     console.error("[/api/advisor]", e);
-    return res.status(500).json({ error: "internal error calling AI advisor" });
+    return llmErrorResponse(res, e, "internal error calling AI advisor");
   }
 });
 
@@ -209,27 +193,23 @@ app.post("/api/chat", requireAuth, async (req, res) => {
   if (!system || !userText) {
     return res.status(400).json({ error: "system and userText are required" });
   }
-  if (!ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: "server is not configured with an Anthropic API key" });
+  if (!isLlmConfigured()) {
+    return res.status(500).json({ error: "server is not configured with an LLM API key (LLM_API_KEY)" });
   }
 
   try {
-    const data = await callAnthropic({
-      model: MODEL,
-      max_tokens: 1000,
+    const msg = await chatCompletion({
       system,
       messages: [{ role: "user", content: userText }],
+      maxTokens: 1000,
     });
-    const text = (data.content || [])
-      .map((b) => b.text || "")
-      .join("\n")
-      .trim();
+    const text = (msg.content || "").trim();
     if (!text) return res.status(502).json({ error: "empty response from model" });
 
     if (json) {
       try {
         const clean = text.replace(/```json|```/g, "").trim();
-        return res.json({ json: JSON.parse(clean) });
+        return res.json({ json: JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1)) });
       } catch {
         return res.status(502).json({ error: "model did not return valid JSON" });
       }
@@ -237,7 +217,7 @@ app.post("/api/chat", requireAuth, async (req, res) => {
     return res.json({ text });
   } catch (e) {
     console.error("[/api/chat]", e);
-    return res.status(500).json({ error: "internal error calling chat" });
+    return llmErrorResponse(res, e, "internal error calling chat");
   }
 });
 

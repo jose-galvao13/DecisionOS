@@ -25,7 +25,9 @@ function AIAdvisor({ analytics, sourceInfo, filters }) {
         ? `Gera uma recomendação de negócio para os dados e filtros atuais. Filtros ativos: ${JSON.stringify(scope)}. Usa as ferramentas disponíveis para reunir evidência antes de responderes.`
         : `Generate a business recommendation for the current data and filters. Active filters: ${JSON.stringify(scope)}. Use the available tools to gather evidence before answering.`;
       const text = await callClaudeWithTools(ADVISOR_SYSTEM[lang], userText, { filters });
-      const result = JSON.parse(text.replace(/```json|```/g, "").trim());
+      const clean = text.replace(/```json|```/g, "").trim();
+      // Llama sometimes adds a sentence before/after the JSON — keep only the {...} block.
+      const result = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
       setAdvice(result);
     } catch (e) {
       setErr(t("advisor.error"));
