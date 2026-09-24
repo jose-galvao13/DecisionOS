@@ -51,19 +51,38 @@ app.use(
   })
 );
 
-// --- Basic rate limiting: protects the LLM quota/bill, not a substitute
-// for real per-tenant quotas. Now that auth/orgs exist (FASE 1), this could
-// be keyed by req.user.orgId instead of just IP — left as IP-based for now
-// since /api/auth/* has to work before a user has a token.
+// --- Rate limiting -------------------------------------------------------
+// Render/Vercel/etc. put a reverse proxy in front of the app. Without
+// "trust proxy" every request looks like it comes from the proxy's IP, so ALL
+// users shared one bucket — a single dashboard load (many /api calls) was
+// enough to trip a 30/min limit and get 429s. Trust the first proxy hop so the
+// limiter sees the real client IP.
+app.set("trust proxy", 1);
+
+// General limit: generous, only there to stop abuse. The dashboard fires many
+// small requests, so this must be far above what a normal session does.
 app.use(
   "/api/",
   rateLimit({
     windowMs: 60_000,
-    max: 30,
+    max: Number(process.env.API_RATE_LIMIT_PER_MIN) || 300,
     standardHeaders: true,
     legacyHeaders: false,
+    message: { error: "too many requests — wait a minute and try again" },
   })
 );
+
+// Strict limit only for the routes that call the LLM (protects its free-tier
+// quota / bill). Keyed by user when logged in, so one person can't burn the
+// budget of everyone behind the same IP.
+const aiLimiter = rateLimit({
+  windowMs: 60_000,
+  max: Number(process.env.AI_RATE_LIMIT_PER_MIN) || 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?.id ? `user:${req.user.id}` : req.ip),
+  message: { error: "too many AI requests — wait a minute and try again" },
+});
 
 // --- FASE 1 routes: auth, organizations/users/roles, data sources
 // (Excel + PostgreSQL), and the first DB-backed analytics endpoint. ------
@@ -130,7 +149,7 @@ function llmErrorResponse(res, e, fallbackMsg) {
    to "confirm" a fabricated analytics payload as real company data,
    because it's never given the chance to supply one.
 ----------------------------------------------------------------*/
-app.post("/api/advisor", requireAuth, async (req, res) => {
+app.post("/api/advisor", requireAuth, aiLimiter, async (req, res) => {
   const { system, userText, filters, maxRounds = 4 } = req.body || {};
   if (!system || !userText) {
     return res.status(400).json({ error: "system and userText are required" });
@@ -197,7 +216,7 @@ app.post("/api/advisor", requireAuth, async (req, res) => {
    Single-shot call (no tools) — used by the lightweight chat widget
    that answers from a pre-built digest rather than live tool calls.
 ----------------------------------------------------------------*/
-app.post("/api/chat", requireAuth, async (req, res) => {
+app.post("/api/chat", requireAuth, aiLimiter, async (req, res) => {
   const { system, userText, json } = req.body || {};
   if (!system || !userText) {
     return res.status(400).json({ error: "system and userText are required" });

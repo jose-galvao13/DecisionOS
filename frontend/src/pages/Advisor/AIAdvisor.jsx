@@ -71,7 +71,10 @@ function AIAdvisor({ analytics, sourceInfo, filters }) {
       const result = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
       setAdvice(normalizeAdvice(result, analytics?.totals?.revenue));
     } catch (e) {
-      setErr(t("advisor.error"));
+      // Show the real reason after the friendly message (rate limit, bad key,
+      // backend asleep...) so a failure can be diagnosed without opening DevTools.
+      console.error("[AIAdvisor]", e);
+      setErr(e?.message ? `${t("advisor.error")} (${e.message})` : t("advisor.error"));
       toast.error(t("advisor.error"));
     } finally { setLoading(false); }
   };
